@@ -4,12 +4,16 @@
     Author: Professional Implementation
 ]]
 
--- Load Censura UI System
-local success, Censura = pcall(function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
+-- Load Censura
+local success, result = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
 end)
 
-if not success then error("Failed to load Censura UI Framework: \n"..Censura) else print("Censura Loaded.") end
+if not success or not result then 
+    error("Failed to load Censura: " .. tostring(result))
+end
+
+local Censura = _G.Censura -- Reference global Censura instance
 
 -- Services
 local Services = {
@@ -18,10 +22,11 @@ local Services = {
     UserInput = game:GetService("UserInputService")
 }
 
+-- Locals
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Services.Players.LocalPlayer
 
--- Create Aimbot Module
+-- Aimbot Module
 local Aimbot = {
     Settings = {
         Enabled = false,
@@ -44,8 +49,7 @@ local Aimbot = {
         },
         MaxDistance = 1000,
         VisibilityCheck = true,
-        TeamCheck = false,
-        TargetPriority = "Distance"
+        TeamCheck = false
     },
     
     Runtime = {
@@ -65,20 +69,7 @@ do
     circle.Color = Aimbot.Settings.FOV.Color
 end
 
--- Utility Functions
-local function IsVisible(part)
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-    rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
-    
-    local origin = Camera.CFrame.Position
-    local direction = (part.Position - origin).Unit * (part.Position - origin).Magnitude
-    
-    local result = workspace:Raycast(origin, direction, rayParams)
-    return result and result.Instance:IsDescendantOf(part.Parent)
-end
-
--- Target Selection Logic
+-- Target System
 local TargetSystem = {
     GetPart = function(character)
         if Aimbot.Settings.TargetMode == "Random" then
@@ -86,6 +77,18 @@ local TargetSystem = {
             return character:FindFirstChild(parts[math.random(1, #parts)])
         end
         return character:FindFirstChild(Aimbot.Settings.TargetMode)
+    end,
+    
+    IsVisible = function(part)
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+        rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
+        
+        local origin = Camera.CFrame.Position
+        local direction = (part.Position - origin).Unit * (part.Position - origin).Magnitude
+        
+        local result = workspace:Raycast(origin, direction, rayParams)
+        return result and result.Instance:IsDescendantOf(part.Parent)
     end,
     
     GetClosest = function()
@@ -111,7 +114,7 @@ local TargetSystem = {
                             local fovDistance = (screenPos - mousePos).Magnitude
                             
                             if fovDistance <= Aimbot.Settings.FOV.Size and
-                               (not Aimbot.Settings.VisibilityCheck or IsVisible(targetPart)) then
+                               (not Aimbot.Settings.VisibilityCheck or TargetSystem.IsVisible(targetPart)) then
                                 
                                 if fovDistance < shortestDistance then
                                     shortestDistance = fovDistance
@@ -128,7 +131,7 @@ local TargetSystem = {
     end
 }
 
--- Aiming System
+-- Aim System
 local AimSystem = {
     Update = function()
         if not Aimbot.Settings.Enabled or 
@@ -160,54 +163,46 @@ local AimSystem = {
     end
 }
 
--- Create UI
+-- UI Creation
 local function CreateUI()
-    local window = Censura.CreateWindow({
+    local window = Censura:CreateWindow({
         title = "Advanced Aimbot",
-        theme = "Dark"
+        size = UDim2.new(0, 300, 0, 400)
     })
-
-    -- Use Censura's Components system
-    local container = Censura.System.Components.Create.Container({
-        name = "AimbotContainer",
-        parent = window.Frame
-    })
-
-    -- Main Settings Section
+    
+    local container = window:AddContainer()
+    
+    -- Main Settings
     container:AddLabel({ text = "Main Settings" })
-
+    
     container:AddToggle({
-        name = "EnableAimbot",
         label = "Enable Aimbot",
         default = Aimbot.Settings.Enabled,
         callback = function(state)
             Aimbot.Settings.Enabled = state
         end
     })
-
+    
     container:AddToggle({
-        name = "TeamCheck",
         label = "Team Check",
         default = Aimbot.Settings.TeamCheck,
         callback = function(state)
             Aimbot.Settings.TeamCheck = state
         end
     })
-
-    -- FOV Settings Section
+    
+    -- FOV Settings
     container:AddLabel({ text = "FOV Settings" })
-
+    
     container:AddToggle({
-        name = "ShowFOV",
         label = "Show FOV Circle",
         default = Aimbot.Settings.FOV.Enabled,
         callback = function(state)
             Aimbot.Settings.FOV.Enabled = state
         end
     })
-
+    
     container:AddSlider({
-        name = "FOVSize",
         label = "FOV Size",
         min = 10,
         max = 800,
@@ -216,21 +211,19 @@ local function CreateUI()
             Aimbot.Settings.FOV.Size = value
         end
     })
-
-    -- Prediction Settings Section
+    
+    -- Prediction Settings
     container:AddLabel({ text = "Prediction Settings" })
-
+    
     container:AddToggle({
-        name = "Prediction",
         label = "Enable Prediction",
         default = Aimbot.Settings.Prediction.Enabled,
         callback = function(state)
             Aimbot.Settings.Prediction.Enabled = state
         end
     })
-
+    
     container:AddSlider({
-        name = "PredictionAmount",
         label = "Prediction Amount",
         min = 0,
         max = 1,
@@ -239,21 +232,19 @@ local function CreateUI()
             Aimbot.Settings.Prediction.Amount = value
         end
     })
-
-    -- Smoothing Settings Section
+    
+    -- Smoothing Settings
     container:AddLabel({ text = "Smoothing Settings" })
-
+    
     container:AddToggle({
-        name = "Smoothing",
         label = "Enable Smoothing",
         default = Aimbot.Settings.Smoothing.Enabled,
         callback = function(state)
             Aimbot.Settings.Smoothing.Enabled = state
         end
     })
-
+    
     container:AddSlider({
-        name = "SmoothingAmount",
         label = "Smoothing Amount",
         min = 0,
         max = 1,
@@ -262,7 +253,7 @@ local function CreateUI()
             Aimbot.Settings.Smoothing.Amount = value
         end
     })
-
+    
     return {
         Window = window,
         Container = container
@@ -275,7 +266,6 @@ local function Initialize()
     
     -- Setup Update Loop
     Aimbot.Runtime.Connections.Update = Services.RunService.RenderStepped:Connect(function()
-        -- Update FOV Circle
         if Aimbot.Settings.FOV.Enabled then
             Aimbot.Runtime.FOVCircle.Position = Services.UserInput:GetMouseLocation()
             Aimbot.Runtime.FOVCircle.Radius = Aimbot.Settings.FOV.Size
@@ -284,7 +274,6 @@ local function Initialize()
             Aimbot.Runtime.FOVCircle.Visible = false
         end
         
-        -- Update Aimbot
         AimSystem.Update()
     end)
     
