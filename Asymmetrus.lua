@@ -5,8 +5,11 @@
 ]]
 
 -- Load Censura UI System
-local Censura = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
-if not Censura then error("Failed to load Censura UI Framework: \n"..Censura) end
+local success, Censura = pcall(function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
+end)
+
+if not success then error("Failed to load Censura UI Framework: \n"..Censura) end
 
 -- Services
 local Services = {
