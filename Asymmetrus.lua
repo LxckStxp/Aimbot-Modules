@@ -162,7 +162,7 @@ local AimSystem = {
 
 -- Create UI
 local function CreateUI()
-    local window = Censura:CreateWindow({
+    local window = Censura.CreateWindow({
         title = "Advanced Aimbot",
         theme = "Dark"
     })
