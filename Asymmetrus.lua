@@ -9,7 +9,7 @@ local success, Censura = pcall(function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
 end)
 
-if not success then error("Failed to load Censura UI Framework: \n"..Censura) end
+if not success then error("Failed to load Censura UI Framework: \n"..Censura) else print("Censura Loaded.") end
 
 -- Services
 local Services = {
