@@ -164,15 +164,16 @@ local function CreateUI()
         theme = "Dark"
     })
 
-    local container = Components.Create.Container({
+    -- Use Censura's Components system
+    local container = Censura.System.Components.Create.Container({
         name = "AimbotContainer",
         parent = window.Frame
     })
 
     -- Main Settings Section
-    container.AddLabel({ text = "Main Settings" })
+    container:AddLabel({ text = "Main Settings" })
 
-    container.AddToggle({
+    container:AddToggle({
         name = "EnableAimbot",
         label = "Enable Aimbot",
         default = Aimbot.Settings.Enabled,
@@ -181,7 +182,7 @@ local function CreateUI()
         end
     })
 
-    container.AddToggle({
+    container:AddToggle({
         name = "TeamCheck",
         label = "Team Check",
         default = Aimbot.Settings.TeamCheck,
@@ -191,10 +192,9 @@ local function CreateUI()
     })
 
     -- FOV Settings Section
-    container.AddSeparator({})
-    container.AddLabel({ text = "FOV Settings" })
+    container:AddLabel({ text = "FOV Settings" })
 
-    container.AddToggle({
+    container:AddToggle({
         name = "ShowFOV",
         label = "Show FOV Circle",
         default = Aimbot.Settings.FOV.Enabled,
@@ -203,7 +203,7 @@ local function CreateUI()
         end
     })
 
-    container.AddSlider({
+    container:AddSlider({
         name = "FOVSize",
         label = "FOV Size",
         min = 10,
@@ -215,10 +215,9 @@ local function CreateUI()
     })
 
     -- Prediction Settings Section
-    container.AddSeparator({})
-    container.AddLabel({ text = "Prediction Settings" })
+    container:AddLabel({ text = "Prediction Settings" })
 
-    container.AddToggle({
+    container:AddToggle({
         name = "Prediction",
         label = "Enable Prediction",
         default = Aimbot.Settings.Prediction.Enabled,
@@ -227,7 +226,7 @@ local function CreateUI()
         end
     })
 
-    container.AddSlider({
+    container:AddSlider({
         name = "PredictionAmount",
         label = "Prediction Amount",
         min = 0,
@@ -239,10 +238,9 @@ local function CreateUI()
     })
 
     -- Smoothing Settings Section
-    container.AddSeparator({})
-    container.AddLabel({ text = "Smoothing Settings" })
+    container:AddLabel({ text = "Smoothing Settings" })
 
-    container.AddToggle({
+    container:AddToggle({
         name = "Smoothing",
         label = "Enable Smoothing",
         default = Aimbot.Settings.Smoothing.Enabled,
@@ -251,7 +249,7 @@ local function CreateUI()
         end
     })
 
-    container.AddSlider({
+    container:AddSlider({
         name = "SmoothingAmount",
         label = "Smoothing Amount",
         min = 0,
