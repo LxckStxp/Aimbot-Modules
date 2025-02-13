@@ -1,7 +1,6 @@
 --[[
-    Advanced Aimbot System
-    Using Censura UI Framework v2.0.0
-    Author: Professional Implementation
+    Simple Aimbot System
+    Using Censura UI Framework
 ]]
 
 -- Load Censura
@@ -13,150 +12,104 @@ if not success or not Censura then
     error("Failed to load Censura UI Framework")
 end
 
--- Services & Locals
-local Services = {
-    Players = game:GetService("Players"),
-    RunService = game:GetService("RunService"),
-    UserInput = game:GetService("UserInputService")
-}
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
+-- Locals
 local Camera = workspace.CurrentCamera
-local LocalPlayer = Services.Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer
 
 -- Aimbot Core
 local Aimbot = {
     Settings = {
         Enabled = false,
-        AimKey = Enum.KeyCode.LeftAlt,
-        TargetPart = "Head",
-        Prediction = { Enabled = true, Amount = 0.165 },
-        Smoothing = { Enabled = true, Amount = 0.6 },
-        FOV = {
+        TeamCheck = false,
+        FOVCircle = {
             Enabled = true,
-            Size = 200,
-            Color = Color3.fromRGB(255, 255, 255),
-            Filled = false,
-            Transparency = 1
+            Size = 200
         },
-        MaxDistance = 1000,
-        VisibilityCheck = true,
-        TeamCheck = false
+        MaxDistance = 1000
     },
     
     Runtime = {
-        FOVCircle = Drawing.new("Circle"),
-        CurrentCFrame = Camera.CFrame,
+        Circle = Drawing.new("Circle"),
         Connections = {}
     }
 }
 
 -- Initialize FOV Circle
 do
-    local circle = Aimbot.Runtime.FOVCircle
-    for prop, value in pairs(Aimbot.Settings.FOV) do
-        if circle[prop] ~= nil then
-            circle[prop] = value
-        end
-    end
+    local circle = Aimbot.Runtime.Circle
     circle.Thickness = 1
-    circle.NumSides = 100
+    circle.NumSides = 36
+    circle.Radius = Aimbot.Settings.FOVCircle.Size
+    circle.Filled = false
+    circle.Transparency = 1
+    circle.Color = Color3.new(1, 1, 1)
 end
 
--- Target System
-local TargetSystem = {
-    GetPart = function(character)
-        return character:FindFirstChild(Aimbot.Settings.TargetPart)
-    end,
+-- Get Closest Target
+local function GetTarget()
+    local closest = nil
+    local shortestDistance = math.huge
+    local mousePos = UserInputService:GetMouseLocation()
     
-    IsVisible = function(part)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Blacklist
-        params.FilterDescendantsInstances = {LocalPlayer.Character}
-        
-        local origin = Camera.CFrame.Position
-        local direction = (part.Position - origin).Unit * (part.Position - origin).Magnitude
-        
-        local result = workspace:Raycast(origin, direction, params)
-        return result and result.Instance:IsDescendantOf(part.Parent)
-    end,
-    
-    GetClosest = function()
-        local closest, shortestDistance = nil, math.huge
-        local mousePos = Services.UserInput:GetMouseLocation()
-        
-        for _, player in ipairs(Services.Players:GetPlayers()) do
-            if player ~= LocalPlayer and 
-               (not Aimbot.Settings.TeamCheck or player.Team ~= LocalPlayer.Team) then
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and 
+           (not Aimbot.Settings.TeamCheck or player.Team ~= LocalPlayer.Team) then
+            
+            local character = player.Character
+            if character then
+                local humanoid = character:FindFirstChild("Humanoid")
+                local head = character:FindFirstChild("Head")
                 
-                local character = player.Character
-                if character then
-                    local humanoid = character:FindFirstChild("Humanoid")
-                    local targetPart = TargetSystem.GetPart(character)
+                if humanoid and humanoid.Health > 0 and head then
+                    local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                    local distance = (head.Position - Camera.CFrame.Position).Magnitude
                     
-                    if humanoid and humanoid.Health > 0 and targetPart then
-                        local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                        local distance = (targetPart.Position - Camera.CFrame.Position).Magnitude
+                    if onScreen and distance <= Aimbot.Settings.MaxDistance then
+                        local screenPos = Vector2.new(pos.X, pos.Y)
+                        local fovDistance = (screenPos - mousePos).Magnitude
                         
-                        if onScreen and distance <= Aimbot.Settings.MaxDistance then
-                            local screenPos = Vector2.new(pos.X, pos.Y)
-                            local fovDistance = (screenPos - mousePos).Magnitude
-                            
-                            if fovDistance <= Aimbot.Settings.FOV.Size and
-                               (not Aimbot.Settings.VisibilityCheck or TargetSystem.IsVisible(targetPart)) then
-                                
-                                if fovDistance < shortestDistance then
-                                    shortestDistance = fovDistance
-                                    closest = targetPart
-                                end
-                            end
+                        if fovDistance <= Aimbot.Settings.FOVCircle.Size and fovDistance < shortestDistance then
+                            shortestDistance = fovDistance
+                            closest = head
                         end
                     end
                 end
             end
         end
-        
-        return closest
     end
-}
+    
+    return closest
+end
 
--- Aim System
+-- Aim Update
 local function UpdateAim()
-    if not (Aimbot.Settings.Enabled and Services.UserInput:IsKeyDown(Aimbot.Settings.AimKey)) then
-        Aimbot.Runtime.CurrentCFrame = Camera.CFrame
+    -- Check if aimbot should be active
+    if not (Aimbot.Settings.Enabled and UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt)) then
         return
     end
     
-    local target = TargetSystem.GetClosest()
+    -- Get and validate target
+    local target = GetTarget()
     if not target then return end
     
-    local targetPos = target.Position
-    if Aimbot.Settings.Prediction.Enabled then
-        targetPos = targetPos + (target.AssemblyLinearVelocity * Aimbot.Settings.Prediction.Amount)
-    end
-    
-    local targetCFrame = CFrame.lookAt(Camera.CFrame.Position, targetPos)
-    
-    if Aimbot.Settings.Smoothing.Enabled then
-        Aimbot.Runtime.CurrentCFrame = Aimbot.Runtime.CurrentCFrame:Lerp(
-            targetCFrame,
-            Aimbot.Settings.Smoothing.Amount
-        )
-    else
-        Aimbot.Runtime.CurrentCFrame = targetCFrame
-    end
-    
-    Camera.CFrame = Aimbot.Runtime.CurrentCFrame
+    -- Aim at target
+    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, target.Position)
 end
 
 -- Create UI
 local function CreateUI()
     local window = Censura:CreateWindow({
-        title = "Advanced Aimbot",
-        size = UDim2.new(0, 300, 0, 400)
+        title = "Simple Aimbot",
+        size = UDim2.new(0, 250, 0, 200)
     })
-
+    
     -- Main Settings
-    window:AddButton({ label = "Main Settings" })
+    window:AddButton({ label = "Aimbot Settings" })
     
     window:AddToggle({
         label = "Enable Aimbot",
@@ -174,98 +127,60 @@ local function CreateUI()
         end
     })
     
-    window:AddToggle({
-        label = "Visibility Check",
-        default = Aimbot.Settings.VisibilityCheck,
-        callback = function(state)
-            Aimbot.Settings.VisibilityCheck = state
-        end
-    })
-
     -- FOV Settings
     window:AddButton({ label = "FOV Settings" })
     
     window:AddToggle({
         label = "Show FOV Circle",
-        default = Aimbot.Settings.FOV.Enabled,
+        default = Aimbot.Settings.FOVCircle.Enabled,
         callback = function(state)
-            Aimbot.Settings.FOV.Enabled = state
+            Aimbot.Settings.FOVCircle.Enabled = state
         end
     })
     
     window:AddSlider({
         label = "FOV Size",
-        min = 10,
+        min = 50,
         max = 800,
-        default = Aimbot.Settings.FOV.Size,
+        default = Aimbot.Settings.FOVCircle.Size,
         callback = function(value)
-            Aimbot.Settings.FOV.Size = value
-        end
-    })
-
-    -- Prediction Settings
-    window:AddButton({ label = "Prediction Settings" })
-    
-    window:AddToggle({
-        label = "Enable Prediction",
-        default = Aimbot.Settings.Prediction.Enabled,
-        callback = function(state)
-            Aimbot.Settings.Prediction.Enabled = state
+            Aimbot.Settings.FOVCircle.Size = value
+            Aimbot.Runtime.Circle.Radius = value
         end
     })
     
     window:AddSlider({
-        label = "Prediction Amount",
-        min = 0,
-        max = 1,
-        default = Aimbot.Settings.Prediction.Amount,
+        label = "Max Distance",
+        min = 100,
+        max = 2000,
+        default = Aimbot.Settings.MaxDistance,
         callback = function(value)
-            Aimbot.Settings.Prediction.Amount = value
-        end
-    })
-
-    -- Smoothing Settings
-    window:AddButton({ label = "Smoothing Settings" })
-    
-    window:AddToggle({
-        label = "Enable Smoothing",
-        default = Aimbot.Settings.Smoothing.Enabled,
-        callback = function(state)
-            Aimbot.Settings.Smoothing.Enabled = state
+            Aimbot.Settings.MaxDistance = value
         end
     })
     
-    window:AddSlider({
-        label = "Smoothing Amount",
-        min = 0,
-        max = 1,
-        default = Aimbot.Settings.Smoothing.Amount,
-        callback = function(value)
-            Aimbot.Settings.Smoothing.Amount = value
-        end
-    })
-
-    return {
-        Window = window
-    }
+    return window
 end
 
 -- Initialize
 local function Initialize()
-    local ui = CreateUI()
+    local window = CreateUI()
     
     -- Setup update loop
-    Aimbot.Runtime.Connections.Update = Services.RunService.RenderStepped:Connect(function()
+    Aimbot.Runtime.Connections.Update = RunService.RenderStepped:Connect(function()
         -- Update FOV Circle
-        Aimbot.Runtime.FOVCircle.Position = Services.UserInput:GetMouseLocation()
-        Aimbot.Runtime.FOVCircle.Radius = Aimbot.Settings.FOV.Size
-        Aimbot.Runtime.FOVCircle.Visible = Aimbot.Settings.FOV.Enabled
+        if Aimbot.Settings.FOVCircle.Enabled then
+            Aimbot.Runtime.Circle.Position = UserInputService:GetMouseLocation()
+            Aimbot.Runtime.Circle.Visible = true
+        else
+            Aimbot.Runtime.Circle.Visible = false
+        end
         
         -- Update Aimbot
         UpdateAim()
     end)
     
-    return ui
+    return window
 end
 
 -- Cleanup
@@ -273,15 +188,13 @@ local function Cleanup()
     for _, connection in pairs(Aimbot.Runtime.Connections) do
         connection:Disconnect()
     end
-    Aimbot.Runtime.FOVCircle:Remove()
+    Aimbot.Runtime.Circle:Remove()
 end
 
 -- Create instance
-local UI = Initialize()
+local Window = Initialize()
 
 return {
-    Core = Aimbot,
-    Window = UI.Window,
-    Container = UI.Container,
+    Window = Window,
     Cleanup = Cleanup
 }
