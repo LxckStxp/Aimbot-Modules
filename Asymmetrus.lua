@@ -6,7 +6,7 @@
 
 -- Load Censura UI System
 local Censura = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
-if not Censura then error("Failed to load Censura UI Framework") end
+if not Censura then error("Failed to load Censura UI Framework: \n"..Censura) end
 
 -- Services
 local Services = {
