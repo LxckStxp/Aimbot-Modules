@@ -155,6 +155,7 @@ local function CreateUI()
         size = UDim2.new(0, 300, 0, 400)
     })
     
+    -- Define sections
     local sections = {
         Main = {
             { type = "toggle", label = "Enable Aimbot", bind = "Enabled" },
@@ -175,15 +176,15 @@ local function CreateUI()
         }
     }
     
-    -- Create sections
-    local container = window:AddContainer()
-    
+    -- Create sections using proper methods
     for sectionName, elements in pairs(sections) do
-        container:AddLabel({ text = sectionName .. " Settings" })
+        window:AddButton({
+            label = "------------ " .. sectionName .. " Settings ------------"
+        })
         
         for _, element in ipairs(elements) do
             if element.type == "toggle" then
-                container:AddToggle({
+                window:AddToggle({
                     label = element.label,
                     default = Aimbot.Settings[element.bind],
                     callback = function(state)
@@ -198,7 +199,7 @@ local function CreateUI()
                     end
                 })
             elseif element.type == "slider" then
-                container:AddSlider({
+                window:AddSlider({
                     label = element.label,
                     min = element.min,
                     max = element.max,
@@ -219,8 +220,7 @@ local function CreateUI()
     end
     
     return {
-        Window = window,
-        Container = container
+        Window = window
     }
 end
 
