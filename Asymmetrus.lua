@@ -154,71 +154,97 @@ local function CreateUI()
         title = "Advanced Aimbot",
         size = UDim2.new(0, 300, 0, 400)
     })
+
+    -- Main Settings
+    window:AddButton({ label = "Main Settings" })
     
-    -- Define sections
-    local sections = {
-        Main = {
-            { type = "toggle", label = "Enable Aimbot", bind = "Enabled" },
-            { type = "toggle", label = "Team Check", bind = "TeamCheck" },
-            { type = "toggle", label = "Visibility Check", bind = "VisibilityCheck" }
-        },
-        FOV = {
-            { type = "toggle", label = "Show FOV Circle", bind = "FOV.Enabled" },
-            { type = "slider", label = "FOV Size", bind = "FOV.Size", min = 10, max = 800 }
-        },
-        Prediction = {
-            { type = "toggle", label = "Enable Prediction", bind = "Prediction.Enabled" },
-            { type = "slider", label = "Prediction Amount", bind = "Prediction.Amount", min = 0, max = 1 }
-        },
-        Smoothing = {
-            { type = "toggle", label = "Enable Smoothing", bind = "Smoothing.Enabled" },
-            { type = "slider", label = "Smoothing Amount", bind = "Smoothing.Amount", min = 0, max = 1 }
-        }
-    }
-    
-    -- Create sections using proper methods
-    for sectionName, elements in pairs(sections) do
-        window:AddButton({
-            label = "------------ " .. sectionName .. " Settings ------------"
-        })
-        
-        for _, element in ipairs(elements) do
-            if element.type == "toggle" then
-                window:AddToggle({
-                    label = element.label,
-                    default = Aimbot.Settings[element.bind],
-                    callback = function(state)
-                        local path = element.bind:split(".")
-                        local target = Aimbot.Settings
-                        
-                        for i = 1, #path - 1 do
-                            target = target[path[i]]
-                        end
-                        
-                        target[path[#path]] = state
-                    end
-                })
-            elseif element.type == "slider" then
-                window:AddSlider({
-                    label = element.label,
-                    min = element.min,
-                    max = element.max,
-                    default = Aimbot.Settings[element.bind],
-                    callback = function(value)
-                        local path = element.bind:split(".")
-                        local target = Aimbot.Settings
-                        
-                        for i = 1, #path - 1 do
-                            target = target[path[i]]
-                        end
-                        
-                        target[path[#path]] = value
-                    end
-                })
-            end
+    window:AddToggle({
+        label = "Enable Aimbot",
+        default = Aimbot.Settings.Enabled,
+        callback = function(state)
+            Aimbot.Settings.Enabled = state
         end
-    end
+    })
     
+    window:AddToggle({
+        label = "Team Check",
+        default = Aimbot.Settings.TeamCheck,
+        callback = function(state)
+            Aimbot.Settings.TeamCheck = state
+        end
+    })
+    
+    window:AddToggle({
+        label = "Visibility Check",
+        default = Aimbot.Settings.VisibilityCheck,
+        callback = function(state)
+            Aimbot.Settings.VisibilityCheck = state
+        end
+    })
+
+    -- FOV Settings
+    window:AddButton({ label = "FOV Settings" })
+    
+    window:AddToggle({
+        label = "Show FOV Circle",
+        default = Aimbot.Settings.FOV.Enabled,
+        callback = function(state)
+            Aimbot.Settings.FOV.Enabled = state
+        end
+    })
+    
+    window:AddSlider({
+        label = "FOV Size",
+        min = 10,
+        max = 800,
+        default = Aimbot.Settings.FOV.Size,
+        callback = function(value)
+            Aimbot.Settings.FOV.Size = value
+        end
+    })
+
+    -- Prediction Settings
+    window:AddButton({ label = "Prediction Settings" })
+    
+    window:AddToggle({
+        label = "Enable Prediction",
+        default = Aimbot.Settings.Prediction.Enabled,
+        callback = function(state)
+            Aimbot.Settings.Prediction.Enabled = state
+        end
+    })
+    
+    window:AddSlider({
+        label = "Prediction Amount",
+        min = 0,
+        max = 1,
+        default = Aimbot.Settings.Prediction.Amount,
+        callback = function(value)
+            Aimbot.Settings.Prediction.Amount = value
+        end
+    })
+
+    -- Smoothing Settings
+    window:AddButton({ label = "Smoothing Settings" })
+    
+    window:AddToggle({
+        label = "Enable Smoothing",
+        default = Aimbot.Settings.Smoothing.Enabled,
+        callback = function(state)
+            Aimbot.Settings.Smoothing.Enabled = state
+        end
+    })
+    
+    window:AddSlider({
+        label = "Smoothing Amount",
+        min = 0,
+        max = 1,
+        default = Aimbot.Settings.Smoothing.Amount,
+        callback = function(value)
+            Aimbot.Settings.Smoothing.Amount = value
+        end
+    })
+
     return {
         Window = window
     }
