@@ -1,267 +1,344 @@
---[[
-    Combat Enhancement System
-    Platform: Roblox
-    Version: 1.1.0
-]]
-
--- Load Censura UI Framework
-local success, Censura = pcall(function()
-    return loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
-end)
-
-if not success or not Censura then 
-    warn("Failed to load Censura UI Framework")
-    return
-end
-
--- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-
--- Locals
-local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
-local ToggleKey = Enum.KeyCode.LeftAlt
+local LocalPlayer = Players.LocalPlayer
 
--- Core System
-local AimbotSystem = {
-    Settings = {
+
+
+local Censura = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
+
+
+
+local Aimbot = {
+    Enabled = false,
+    IsAiming = false,
+    TargetPart = "Head",
+    AimMethod = "Camera",
+    Smoothness = 1,
+    FOV = 400,
+    MaxDistance = 1000,
+    TeamCheck = false,
+    VisibilityCheck = true,
+    CurrentTarget = nil,
+    CurrentHighlight = nil,
+    PredictionAmount = 0.0,
+    TriggerBot = {
         Enabled = false,
-        TeamCheck = false,
-        FOV = {
-            Enabled = true,
-            Size = 250
+        Delay = {
+            Min = 0.08,
+            Max = 0.15
         },
-        MaxDistance = 1000
+        LastShot = 0,
+        BurstConfig = {
+            Enabled = true,
+            MinShots = 2,
+            MaxShots = 4,
+            ShotsLeft = 0
+        },
+        HumanizationConfig = {
+            Enabled = true,
+            MissChance = 0.1,
+            ReactionDelay = {
+                Min = 0.05,
+                Max = 0.15
+            }
+        }
     },
-    
-    Runtime = {
-        Active = false,
-        FOVCircle = Drawing.new("Circle"),
-        TargetHighlight = Instance.new("Highlight")
+    TargetFilters = {
+        IgnoreDead = true,
+        IgnorePlayers = false,
+        IgnoreNPCs = false,
+        MinHealth = 0
     }
 }
 
--- Initialize Visual Elements
-do
-    -- FOV Circle
-    AimbotSystem.Runtime.FOVCircle.Visible = true
-    AimbotSystem.Runtime.FOVCircle.Color = Color3.fromRGB(255, 255, 255)
-    AimbotSystem.Runtime.FOVCircle.Thickness = 1.5
-    AimbotSystem.Runtime.FOVCircle.NumSides = 60
-    AimbotSystem.Runtime.FOVCircle.Radius = AimbotSystem.Settings.FOV.Size
-    
-    -- Target Highlight
-    AimbotSystem.Runtime.TargetHighlight.FillColor = Color3.fromRGB(255, 0, 0)
-    AimbotSystem.Runtime.TargetHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    AimbotSystem.Runtime.TargetHighlight.FillTransparency = 0.5
-    AimbotSystem.Runtime.TargetHighlight.OutlineTransparency = 0
+
+
+local function IsHumanoidAlive(humanoid)
+    return humanoid and humanoid.Health > Aimbot.TargetFilters.MinHealth
 end
 
--- Target Acquisition System
-local function GetTarget()
-    local closest = nil
-    local shortestDistance = math.huge
-    local mousePos = UserInputService:GetMouseLocation()
-    
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        if AimbotSystem.Settings.TeamCheck and player.Team == LocalPlayer.Team then continue end
-        
-        local character = player.Character
-        if not character then continue end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        local head = character:FindFirstChild("Head")
-        
-        if not (humanoid and humanoid.Health > 0 and head) then continue end
-        
-        local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
-        if not onScreen then continue end
-        
-        local screenPos = Vector2.new(pos.X, pos.Y)
-        local distance = (head.Position - Camera.CFrame.Position).Magnitude
-        
-        if distance > AimbotSystem.Settings.MaxDistance then continue end
-        
-        local fovDistance = (screenPos - mousePos).Magnitude
-        if fovDistance > AimbotSystem.Settings.FOV.Size then continue end
-        
-        if fovDistance < shortestDistance then
-            shortestDistance = fovDistance
-            closest = {
-                Player = player,
-                Character = character,
-                Head = head,
-                Distance = distance
-            }
+
+
+local function IsValidTarget(model)
+    if not model:IsA("Model") then return false end
+    local humanoid = model:FindFirstChild("Humanoid")
+    if not humanoid then return false end
+    if Aimbot.TargetFilters.IgnoreDead and not IsHumanoidAlive(humanoid) then return false end
+    if not model:FindFirstChild(Aimbot.TargetPart) then return false end
+    local player = Players:GetPlayerFromCharacter(model)
+    if player then
+        if Aimbot.TargetFilters.IgnorePlayers then return false end
+        if player == LocalPlayer then return false end
+        if Aimbot.TeamCheck and player.Team == LocalPlayer.Team then return false end
+    else
+        if Aimbot.TargetFilters.IgnoreNPCs then return false end
+    end
+    return true
+end
+
+
+
+local function GetAllValidTargets()
+    local targets = {}
+    for _, model in pairs(workspace:GetDescendants()) do
+        if IsValidTarget(model) then
+            table.insert(targets, model)
         end
     end
-    
+    return targets
+end
+
+
+
+local function IsVisible(part)
+    local character = LocalPlayer.Character
+    if not character then return false end
+    local origin = character:FindFirstChild("Head") and character.Head.Position or character:GetPivot().Position
+    local direction = (part.Position - origin).Unit
+    local ray = Ray.new(origin, direction * Aimbot.MaxDistance)
+    local hit, position = workspace:FindPartOnRayWithIgnoreList(ray, {character})
+    return hit and hit:IsDescendantOf(part.Parent)
+end
+
+
+
+local function GetClosestTarget()
+    local closest = nil
+    local shortestDistance = Aimbot.FOV
+    local mousePos = UserInputService:GetMouseLocation()
+    for _, model in pairs(GetAllValidTargets()) do
+        local targetPart = model:FindFirstChild(Aimbot.TargetPart)
+        if not targetPart then continue end
+        local distance = (LocalPlayer.Character:GetPivot().Position - targetPart.Position).Magnitude
+        if distance > Aimbot.MaxDistance then continue end
+        local pos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+        if not onScreen then continue end
+        local screenDistance = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+        if screenDistance < shortestDistance then
+            if Aimbot.VisibilityCheck and not IsVisible(targetPart) then continue end
+            closest = model
+            shortestDistance = screenDistance
+        end
+    end
     return closest
 end
 
--- Visibility Check System
-local function IsVisible(target)
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, target.Character}
-    
-    local origin = Camera.CFrame.Position
-    local direction = target.Head.Position - origin
-    
-    local result = workspace:Raycast(origin, direction, rayParams)
-    return not result
+
+
+local Window = Censura:CreateWindow({
+    title = "Universal Aimbot",
+    size = UDim2.new(0, 300, 0, 400)
+})
+
+
+
+local ToggleAimbot = Window:AddToggle({
+    label = "Enable Aimbot (Hold Alt)",
+    callback = function(value)
+        Aimbot.Enabled = value
+        if not value and Aimbot.CurrentHighlight then
+            Aimbot.CurrentHighlight:Destroy()
+            Aimbot.CurrentHighlight = nil
+        end
+    end
+})
+
+
+
+local TriggerToggle = Window:AddToggle({
+    label = "Enable TriggerBot",
+    callback = function(value)
+        Aimbot.TriggerBot.Enabled = value
+    end
+})
+
+
+
+local SmoothnessSlider = Window:AddSlider({
+    label = "Smoothness",
+    min = 0.1,
+    max = 1,
+    default = 0.5,
+    callback = function(value)
+        Aimbot.Smoothness = value
+    end
+})
+
+
+
+local FOVSlider = Window:AddSlider({
+    label = "FOV",
+    min = 50,
+    max = 800,
+    default = 400,
+    callback = function(value)
+        Aimbot.FOV = value
+    end
+})
+
+
+
+local function UpdateTargetHighlight(target)
+    if Aimbot.CurrentHighlight then
+        Aimbot.CurrentHighlight:Destroy()
+        Aimbot.CurrentHighlight = nil
+    end
+    if target then
+        local visible = IsVisible(target[Aimbot.TargetPart])
+        Aimbot.CurrentHighlight = Instance.new("Highlight")
+        Aimbot.CurrentHighlight.FillColor = visible and Color3.new(1, 0, 0) or Color3.new(1, 1, 1)
+        Aimbot.CurrentHighlight.OutlineColor = Color3.new(1, 1, 1)
+        Aimbot.CurrentHighlight.FillTransparency = 0.5
+        Aimbot.CurrentHighlight.OutlineTransparency = 0
+        Aimbot.CurrentHighlight.Parent = target
+    end
 end
 
--- Core Update Function
-local function Update()
-    -- Update FOV Circle
-    if AimbotSystem.Settings.FOV.Enabled then
-        AimbotSystem.Runtime.FOVCircle.Position = UserInputService:GetMouseLocation()
-        AimbotSystem.Runtime.FOVCircle.Radius = AimbotSystem.Settings.FOV.Size
-        AimbotSystem.Runtime.FOVCircle.Visible = true
+
+
+local function AimAtTarget(targetPos)
+    if not targetPos then return end
+    local character = LocalPlayer.Character
+    if not character then return end
+    local targetCF = CFrame.new(Camera.CFrame.Position, targetPos)
+    Camera.CFrame = Camera.CFrame:Lerp(targetCF, Aimbot.Smoothness)
+end
+
+
+
+local function GetWeaponRemotes(tool)
+    local remotes = {}
+    for _, obj in pairs(tool:GetDescendants()) do
+        if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+            if obj.Name:lower():match("fire") or obj.Name:lower():match("shoot") or obj.Name:lower():match("activate") or obj.Name:lower():match("mouse") then
+                table.insert(remotes, obj)
+            end
+        end
+    end
+    return remotes
+end
+
+
+
+local function SimulateWeaponFire(tool)
+    local remotes = GetWeaponRemotes(tool)
+    local method = math.random(1, 3)
+    
+    if method == 1 and #remotes > 0 then
+        local remote = remotes[math.random(1, #remotes)]
+        if remote:IsA("RemoteEvent") then
+            remote:FireServer()
+        elseif remote:IsA("RemoteFunction") then
+            remote:InvokeServer()
+        end
+    elseif method == 2 then
+        if tool:FindFirstChild("Enabled") then
+            tool.Enabled = false
+            task.wait(math.random(1, 3) * 0.01)
+            tool.Enabled = true
+        end
+        if tool:FindFirstChild("Active") then
+            tool.Active = true
+            task.wait(math.random(1, 2) * 0.01)
+            tool.Active = false
+        end
     else
-        AimbotSystem.Runtime.FOVCircle.Visible = false
+        local fireFunction = tool:FindFirstChild("Fire") or tool:FindFirstChild("Shoot") or tool:FindFirstChild("Activate")
+        if fireFunction and typeof(fireFunction) == "function" then
+            fireFunction:Invoke()
+        end
     end
-    
-    -- Check if system should be active
-    if not (AimbotSystem.Settings.Enabled and AimbotSystem.Runtime.Active) then
-        AimbotSystem.Runtime.TargetHighlight.Parent = nil
-        return
-    end
-    
-    -- Get and validate target
-    local target = GetTarget()
-    if not target then
-        AimbotSystem.Runtime.TargetHighlight.Parent = nil
-        return
-    end
-    
-    -- Update target highlight
-    local isVisible = IsVisible(target)
-    AimbotSystem.Runtime.TargetHighlight.FillColor = isVisible and 
-        Color3.fromRGB(255, 0, 0) or 
-        Color3.fromRGB(255, 255, 255)
-    AimbotSystem.Runtime.TargetHighlight.Parent = target.Character
-    
-    -- Update aim
-    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, target.Head.Position)
-    
-    -- Move mouse
-    local pos = Camera:WorldToViewportPoint(target.Head.Position)
-    local mousePos = UserInputService:GetMouseLocation()
-    mousemoverel(
-        (pos.X - mousePos.X),
-        (pos.Y - mousePos.Y)
-    )
 end
 
--- Input Handler
+
+
+local function GetRandomDelay()
+    return Aimbot.TriggerBot.Delay.Min + (math.random() * (Aimbot.TriggerBot.Delay.Max - Aimbot.TriggerBot.Delay.Min))
+end
+
+
+
+local function ShouldTakeShot()
+    if not Aimbot.TriggerBot.HumanizationConfig.Enabled then return true end
+    return math.random() > Aimbot.TriggerBot.HumanizationConfig.MissChance
+end
+
+
+
+local function HandleTriggerBot(target)
+    if not target then return end
+    local currentTime = tick()
+    local timeSinceLastShot = currentTime - Aimbot.TriggerBot.LastShot
+    
+    if Aimbot.TriggerBot.BurstConfig.Enabled then
+        if Aimbot.TriggerBot.BurstConfig.ShotsLeft <= 0 then
+            Aimbot.TriggerBot.BurstConfig.ShotsLeft = math.random(
+                Aimbot.TriggerBot.BurstConfig.MinShots,
+                Aimbot.TriggerBot.BurstConfig.MaxShots
+            )
+            task.wait(math.random() * 0.2 + 0.1)
+        end
+    end
+    
+    if timeSinceLastShot >= GetRandomDelay() then
+        if ShouldTakeShot() then
+            local character = LocalPlayer.Character
+            if character then
+                local tool = character:FindFirstChildOfClass("Tool")
+                if tool then
+                    if Aimbot.TriggerBot.HumanizationConfig.Enabled then
+                        local reactionDelay = Aimbot.TriggerBot.HumanizationConfig.ReactionDelay
+                        task.wait(reactionDelay.Min + math.random() * (reactionDelay.Max - reactionDelay.Min))
+                    end
+                    SimulateWeaponFire(tool)
+                    if Aimbot.TriggerBot.BurstConfig.Enabled then
+                        Aimbot.TriggerBot.BurstConfig.ShotsLeft -= 1
+                    end
+                end
+            end
+        end
+        Aimbot.TriggerBot.LastShot = currentTime
+    end
+end
+
+
+
 UserInputService.InputBegan:Connect(function(input)
-    if input.KeyCode == ToggleKey then
-        AimbotSystem.Runtime.Active = true
+    if input.KeyCode == Enum.KeyCode.LeftAlt then
+        Aimbot.IsAiming = true
     end
 end)
+
+
 
 UserInputService.InputEnded:Connect(function(input)
-    if input.KeyCode == ToggleKey then
-        AimbotSystem.Runtime.Active = false
-        AimbotSystem.Runtime.TargetHighlight.Parent = nil
+    if input.KeyCode == Enum.KeyCode.LeftAlt then
+        Aimbot.IsAiming = false
+        if Aimbot.CurrentHighlight then
+            Aimbot.CurrentHighlight:Destroy()
+            Aimbot.CurrentHighlight = nil
+        end
     end
 end)
 
--- UI System
-local function CreateUI()
-    local window = Censura:CreateWindow({
-        title = "Combat Enhancement",
-        size = UDim2.new(0, 250, 0, 200)
-    })
-    
-    -- Main Settings
-    window:AddButton({ label = "Main Settings" })
-    
-    window:AddToggle({
-        label = "Enable System",
-        default = AimbotSystem.Settings.Enabled,
-        callback = function(state)
-            AimbotSystem.Settings.Enabled = state
-            print("System Enabled:", state) -- Debug print
-        end
-    })
-    
-    window:AddToggle({
-        label = "Team Check",
-        default = AimbotSystem.Settings.TeamCheck,
-        callback = function(state)
-            AimbotSystem.Settings.TeamCheck = state
-        end
-    })
-    
-    -- FOV Settings
-    window:AddButton({ label = "FOV Settings" })
-    
-    window:AddToggle({
-        label = "Show FOV",
-        default = AimbotSystem.Settings.FOV.Enabled,
-        callback = function(state)
-            AimbotSystem.Settings.FOV.Enabled = state
-            AimbotSystem.Runtime.FOVCircle.Visible = state
-        end
-    })
-    
-    window:AddSlider({
-        label = "FOV Size",
-        min = 50,
-        max = 800,
-        default = AimbotSystem.Settings.FOV.Size,
-        callback = function(value)
-            AimbotSystem.Settings.FOV.Size = value
-            AimbotSystem.Runtime.FOVCircle.Radius = value
-        end
-    })
-    
-    window:AddSlider({
-        label = "Max Distance",
-        min = 100,
-        max = 2000,
-        default = AimbotSystem.Settings.MaxDistance,
-        callback = function(value)
-            AimbotSystem.Settings.MaxDistance = value
-        end
-    })
-    
-    return window
-end
 
--- Initialize System
-local function Initialize()
-    -- Create UI
-    local window = CreateUI()
-    
-    -- Setup update loop
-    RunService.RenderStepped:Connect(Update)
-    
-    return window
-end
 
--- Cleanup System
-local function Cleanup()
-    if AimbotSystem.Runtime.FOVCircle then
-        AimbotSystem.Runtime.FOVCircle:Remove()
+RunService.RenderStepped:Connect(function()
+    if not Aimbot.Enabled or not Aimbot.IsAiming then return end
+    local target = GetClosestTarget()
+    if target ~= Aimbot.CurrentTarget then
+        Aimbot.CurrentTarget = target
+        UpdateTargetHighlight(target)
     end
-    
-    if AimbotSystem.Runtime.TargetHighlight then
-        AimbotSystem.Runtime.TargetHighlight:Destroy()
+    if target then
+        local targetPart = target:FindFirstChild(Aimbot.TargetPart)
+        if targetPart then
+            AimAtTarget(targetPart.Position)
+            if Aimbot.TriggerBot.Enabled then
+                HandleTriggerBot(target)
+            end
+        end
     end
-end
-
--- Create Instance
-local Window = Initialize()
-
--- Return API
-return {
-    Window = Window,
-    Cleanup = Cleanup
-}
+end)
