@@ -1,15 +1,17 @@
 --[[
-    Combat Assistance System
-    Version: 1.0.0
+    Combat Enhancement System
+    Platform: Roblox
+    Version: 1.1.0
 ]]
 
--- Load Censura UI
+-- Load Censura UI Framework
 local success, Censura = pcall(function()
     return loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
 end)
 
 if not success or not Censura then 
-    error("Failed to load Censura UI Framework")
+    warn("Failed to load Censura UI Framework")
+    return
 end
 
 -- Services
@@ -20,150 +22,135 @@ local UserInputService = game:GetService("UserInputService")
 -- Locals
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+local ToggleKey = Enum.KeyCode.LeftAlt
 
--- Main Module
-local Aimbot = {
+-- Core System
+local AimbotSystem = {
     Settings = {
         Enabled = false,
         TeamCheck = false,
         FOV = {
             Enabled = true,
-            Size = 200
+            Size = 250
         },
         MaxDistance = 1000
     },
     
     Runtime = {
-        Circle = Drawing.new("Circle"),
-        Highlight = Instance.new("Highlight"),
-        Active = false
+        Active = false,
+        FOVCircle = Drawing.new("Circle"),
+        TargetHighlight = Instance.new("Highlight")
     }
 }
 
 -- Initialize Visual Elements
 do
-    -- FOV Circle Setup
-    local circle = Aimbot.Runtime.Circle
-    circle.Thickness = 2
-    circle.NumSides = 48
-    circle.Radius = Aimbot.Settings.FOV.Size
-    circle.Filled = false
-    circle.Transparency = 1
-    circle.Color = Color3.new(1, 1, 1)
-    circle.Visible = true
+    -- FOV Circle
+    AimbotSystem.Runtime.FOVCircle.Visible = true
+    AimbotSystem.Runtime.FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+    AimbotSystem.Runtime.FOVCircle.Thickness = 1.5
+    AimbotSystem.Runtime.FOVCircle.NumSides = 60
+    AimbotSystem.Runtime.FOVCircle.Radius = AimbotSystem.Settings.FOV.Size
     
-    -- Highlight Setup
-    local highlight = Aimbot.Runtime.Highlight
-    highlight.FillColor = Color3.new(1, 0, 0)
-    highlight.OutlineColor = Color3.new(1, 1, 1)
-    highlight.FillTransparency = 0.5
-    highlight.OutlineTransparency = 0
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    -- Target Highlight
+    AimbotSystem.Runtime.TargetHighlight.FillColor = Color3.fromRGB(255, 0, 0)
+    AimbotSystem.Runtime.TargetHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    AimbotSystem.Runtime.TargetHighlight.FillTransparency = 0.5
+    AimbotSystem.Runtime.TargetHighlight.OutlineTransparency = 0
 end
 
--- Target Acquisition
-local function GetClosestTarget()
+-- Target Acquisition System
+local function GetTarget()
     local closest = nil
     local shortestDistance = math.huge
     local mousePos = UserInputService:GetMouseLocation()
     
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and 
-           (not Aimbot.Settings.TeamCheck or player.Team ~= LocalPlayer.Team) then
-            
-            local character = player.Character
-            if character then
-                local humanoid = character:FindFirstChild("Humanoid")
-                local head = character:FindFirstChild("Head")
-                
-                if humanoid and humanoid.Health > 0 and head then
-                    local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
-                    if not onScreen then continue end
-                    
-                    local distance = (head.Position - Camera.CFrame.Position).Magnitude
-                    if distance > Aimbot.Settings.MaxDistance then continue end
-                    
-                    local screenPos = Vector2.new(pos.X, pos.Y)
-                    local fovDistance = (screenPos - mousePos).Magnitude
-                    
-                    if fovDistance <= Aimbot.Settings.FOV.Size and fovDistance < shortestDistance then
-                        shortestDistance = fovDistance
-                        closest = {
-                            Instance = head,
-                            Position = head.Position,
-                            Character = character
-                        }
-                    end
-                end
-            end
+        if player == LocalPlayer then continue end
+        if AimbotSystem.Settings.TeamCheck and player.Team == LocalPlayer.Team then continue end
+        
+        local character = player.Character
+        if not character then continue end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        local head = character:FindFirstChild("Head")
+        
+        if not (humanoid and humanoid.Health > 0 and head) then continue end
+        
+        local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+        if not onScreen then continue end
+        
+        local screenPos = Vector2.new(pos.X, pos.Y)
+        local distance = (head.Position - Camera.CFrame.Position).Magnitude
+        
+        if distance > AimbotSystem.Settings.MaxDistance then continue end
+        
+        local fovDistance = (screenPos - mousePos).Magnitude
+        if fovDistance > AimbotSystem.Settings.FOV.Size then continue end
+        
+        if fovDistance < shortestDistance then
+            shortestDistance = fovDistance
+            closest = {
+                Player = player,
+                Character = character,
+                Head = head,
+                Distance = distance
+            }
         end
     end
     
     return closest
 end
 
--- Visibility Check
+-- Visibility Check System
 local function IsVisible(target)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, target.Character}
+    
     local origin = Camera.CFrame.Position
-    local direction = (target.Position - origin).Unit
-    local distance = (target.Position - origin).Magnitude
+    local direction = target.Head.Position - origin
     
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
-    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local result = workspace:Raycast(origin, direction * distance, raycastParams)
-    return not result or result.Instance:IsDescendantOf(target.Character)
+    local result = workspace:Raycast(origin, direction, rayParams)
+    return not result
 end
 
--- Input Handler
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if input.KeyCode == Enum.KeyCode.LeftAlt then
-        Aimbot.Runtime.Active = true
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if input.KeyCode == Enum.KeyCode.LeftAlt then
-        Aimbot.Runtime.Active = false
-        Aimbot.Runtime.Highlight.Parent = nil
-    end
-end)
-
--- Update Function
+-- Core Update Function
 local function Update()
     -- Update FOV Circle
-    if Aimbot.Settings.FOV.Enabled then
-        Aimbot.Runtime.Circle.Position = UserInputService:GetMouseLocation()
-        Aimbot.Runtime.Circle.Radius = Aimbot.Settings.FOV.Size
-        Aimbot.Runtime.Circle.Visible = true
+    if AimbotSystem.Settings.FOV.Enabled then
+        AimbotSystem.Runtime.FOVCircle.Position = UserInputService:GetMouseLocation()
+        AimbotSystem.Runtime.FOVCircle.Radius = AimbotSystem.Settings.FOV.Size
+        AimbotSystem.Runtime.FOVCircle.Visible = true
     else
-        Aimbot.Runtime.Circle.Visible = false
+        AimbotSystem.Runtime.FOVCircle.Visible = false
     end
     
-    -- Check if aimbot should run
-    if not (Aimbot.Settings.Enabled and Aimbot.Runtime.Active) then
-        Aimbot.Runtime.Highlight.Parent = nil
+    -- Check if system should be active
+    if not (AimbotSystem.Settings.Enabled and AimbotSystem.Runtime.Active) then
+        AimbotSystem.Runtime.TargetHighlight.Parent = nil
         return
     end
     
-    -- Get target
-    local target = GetClosestTarget()
+    -- Get and validate target
+    local target = GetTarget()
     if not target then
-        Aimbot.Runtime.Highlight.Parent = nil
+        AimbotSystem.Runtime.TargetHighlight.Parent = nil
         return
     end
     
-    -- Update highlight
-    local visible = IsVisible(target)
-    Aimbot.Runtime.Highlight.FillColor = visible and Color3.new(1, 0, 0) or Color3.new(1, 1, 1)
-    Aimbot.Runtime.Highlight.Parent = target.Character
+    -- Update target highlight
+    local isVisible = IsVisible(target)
+    AimbotSystem.Runtime.TargetHighlight.FillColor = isVisible and 
+        Color3.fromRGB(255, 0, 0) or 
+        Color3.fromRGB(255, 255, 255)
+    AimbotSystem.Runtime.TargetHighlight.Parent = target.Character
     
     -- Update aim
-    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, target.Position)
+    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, target.Head.Position)
     
     -- Move mouse
-    local pos = Camera:WorldToViewportPoint(target.Position)
+    local pos = Camera:WorldToViewportPoint(target.Head.Position)
     local mousePos = UserInputService:GetMouseLocation()
     mousemoverel(
         (pos.X - mousePos.X),
@@ -171,38 +158,56 @@ local function Update()
     )
 end
 
--- UI Creation
+-- Input Handler
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == ToggleKey then
+        AimbotSystem.Runtime.Active = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == ToggleKey then
+        AimbotSystem.Runtime.Active = false
+        AimbotSystem.Runtime.TargetHighlight.Parent = nil
+    end
+end)
+
+-- UI System
 local function CreateUI()
     local window = Censura:CreateWindow({
-        title = "Combat Assistance",
+        title = "Combat Enhancement",
         size = UDim2.new(0, 250, 0, 200)
     })
     
+    -- Main Settings
     window:AddButton({ label = "Main Settings" })
     
     window:AddToggle({
-        label = "Enable",
-        default = Aimbot.Settings.Enabled,
+        label = "Enable System",
+        default = AimbotSystem.Settings.Enabled,
         callback = function(state)
-            Aimbot.Settings.Enabled = state
+            AimbotSystem.Settings.Enabled = state
+            print("System Enabled:", state) -- Debug print
         end
     })
     
     window:AddToggle({
         label = "Team Check",
-        default = Aimbot.Settings.TeamCheck,
+        default = AimbotSystem.Settings.TeamCheck,
         callback = function(state)
-            Aimbot.Settings.TeamCheck = state
+            AimbotSystem.Settings.TeamCheck = state
         end
     })
     
+    -- FOV Settings
     window:AddButton({ label = "FOV Settings" })
     
     window:AddToggle({
         label = "Show FOV",
-        default = Aimbot.Settings.FOV.Enabled,
+        default = AimbotSystem.Settings.FOV.Enabled,
         callback = function(state)
-            Aimbot.Settings.FOV.Enabled = state
+            AimbotSystem.Settings.FOV.Enabled = state
+            AimbotSystem.Runtime.FOVCircle.Visible = state
         end
     })
     
@@ -210,10 +215,10 @@ local function CreateUI()
         label = "FOV Size",
         min = 50,
         max = 800,
-        default = Aimbot.Settings.FOV.Size,
+        default = AimbotSystem.Settings.FOV.Size,
         callback = function(value)
-            Aimbot.Settings.FOV.Size = value
-            Aimbot.Runtime.Circle.Radius = value
+            AimbotSystem.Settings.FOV.Size = value
+            AimbotSystem.Runtime.FOVCircle.Radius = value
         end
     })
     
@@ -221,17 +226,18 @@ local function CreateUI()
         label = "Max Distance",
         min = 100,
         max = 2000,
-        default = Aimbot.Settings.MaxDistance,
+        default = AimbotSystem.Settings.MaxDistance,
         callback = function(value)
-            Aimbot.Settings.MaxDistance = value
+            AimbotSystem.Settings.MaxDistance = value
         end
     })
     
     return window
 end
 
--- Initialize
+-- Initialize System
 local function Initialize()
+    -- Create UI
     local window = CreateUI()
     
     -- Setup update loop
@@ -240,15 +246,21 @@ local function Initialize()
     return window
 end
 
--- Cleanup
+-- Cleanup System
 local function Cleanup()
-    Aimbot.Runtime.Circle:Remove()
-    Aimbot.Runtime.Highlight:Destroy()
+    if AimbotSystem.Runtime.FOVCircle then
+        AimbotSystem.Runtime.FOVCircle:Remove()
+    end
+    
+    if AimbotSystem.Runtime.TargetHighlight then
+        AimbotSystem.Runtime.TargetHighlight:Destroy()
+    end
 end
 
--- Create instance
+-- Create Instance
 local Window = Initialize()
 
+-- Return API
 return {
     Window = Window,
     Cleanup = Cleanup
