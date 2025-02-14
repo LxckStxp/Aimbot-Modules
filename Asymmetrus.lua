@@ -14,17 +14,13 @@ if not success or not Censura then
 end
 
 -- Services
-local Services = {
-    Players = game:GetService("Players"),
-    RunService = game:GetService("RunService"),
-    UserInputService = game:GetService("UserInputService"),
-    VirtualUser = game:GetService("VirtualUser"),
-    GuiService = game:GetService("GuiService")
-}
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 -- Locals
 local Camera = workspace.CurrentCamera
-local LocalPlayer = Services.Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer
 
 -- Aimbot Core
 local Aimbot = {
@@ -40,29 +36,30 @@ local Aimbot = {
     
     Runtime = {
         Circle = Drawing.new("Circle"),
-        Connections = {}
+        Connections = {},
+        Active = false
     }
 }
 
 -- Initialize FOV Circle
 do
     local circle = Aimbot.Runtime.Circle
-    circle.Thickness = 1
-    circle.NumSides = 36
+    circle.Thickness = 2
+    circle.NumSides = 48
     circle.Radius = Aimbot.Settings.FOVCircle.Size
     circle.Filled = false
     circle.Transparency = 1
     circle.Color = Color3.new(1, 1, 1)
-    circle.Visible = Aimbot.Settings.FOVCircle.Enabled
+    circle.Visible = true
 end
 
--- Target Acquisition
+-- Get Closest Target
 local function GetTarget()
     local closest = nil
     local shortestDistance = math.huge
-    local mousePos = Services.UserInputService:GetMouseLocation()
+    local mousePos = UserInputService:GetMouseLocation()
     
-    for _, player in ipairs(Services.Players:GetPlayers()) do
+    for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and 
            (not Aimbot.Settings.TeamCheck or player.Team ~= LocalPlayer.Team) then
             
@@ -92,14 +89,36 @@ local function GetTarget()
     return closest
 end
 
--- Aiming System
-local function UpdateAim()
-    -- Validate aimbot state
-    if not (Aimbot.Settings.Enabled and Services.UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt)) then
+-- Handle Input
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftAlt then
+        Aimbot.Runtime.Active = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftAlt then
+        Aimbot.Runtime.Active = false
+    end
+end)
+
+-- Update Function
+local function Update()
+    -- Update FOV Circle
+    if Aimbot.Settings.FOVCircle.Enabled then
+        Aimbot.Runtime.Circle.Position = UserInputService:GetMouseLocation()
+        Aimbot.Runtime.Circle.Radius = Aimbot.Settings.FOVCircle.Size
+        Aimbot.Runtime.Circle.Visible = true
+    else
+        Aimbot.Runtime.Circle.Visible = false
+    end
+    
+    -- Check if aimbot should be active
+    if not (Aimbot.Settings.Enabled and Aimbot.Runtime.Active) then
         return
     end
     
-    -- Get target
+    -- Get and validate target
     local target = GetTarget()
     if not target then return end
     
@@ -107,24 +126,20 @@ local function UpdateAim()
     local pos, onScreen = Camera:WorldToViewportPoint(target.Position)
     if not onScreen then return end
     
-    -- Update mouse and camera
-    local targetPos = Vector2.new(pos.X, pos.Y)
-    
-    -- Move mouse to target
-    mousemoveabs(targetPos.X, targetPos.Y)
-    
-    -- Update camera
-    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, target.Position)
+    -- Move mouse and camera
+    mousemoverel(
+        (pos.X - UserInputService:GetMouseLocation().X) * 0.5,
+        (pos.Y - UserInputService:GetMouseLocation().Y) * 0.5
+    )
 end
 
--- User Interface
+-- Create UI
 local function CreateUI()
     local window = Censura:CreateWindow({
         title = "Combat Assistance",
         size = UDim2.new(0, 250, 0, 200)
     })
     
-    -- Main Settings
     window:AddButton({ label = "Main Settings" })
     
     window:AddToggle({
@@ -143,7 +158,6 @@ local function CreateUI()
         end
     })
     
-    -- FOV Settings
     window:AddButton({ label = "FOV Settings" })
     
     window:AddToggle({
@@ -151,7 +165,6 @@ local function CreateUI()
         default = Aimbot.Settings.FOVCircle.Enabled,
         callback = function(state)
             Aimbot.Settings.FOVCircle.Enabled = state
-            Aimbot.Runtime.Circle.Visible = state
         end
     })
     
@@ -162,7 +175,6 @@ local function CreateUI()
         default = Aimbot.Settings.FOVCircle.Size,
         callback = function(value)
             Aimbot.Settings.FOVCircle.Size = value
-            Aimbot.Runtime.Circle.Radius = value
         end
     })
     
@@ -179,44 +191,29 @@ local function CreateUI()
     return window
 end
 
--- System Initialization
+-- Initialize
 local function Initialize()
     local window = CreateUI()
     
     -- Setup update loop
-    Aimbot.Runtime.Connections.Update = Services.RunService.RenderStepped:Connect(function()
-        -- Update FOV Circle
-        if Aimbot.Settings.FOVCircle.Enabled then
-            Aimbot.Runtime.Circle.Position = Services.UserInputService:GetMouseLocation()
-            Aimbot.Runtime.Circle.Visible = true
-        else
-            Aimbot.Runtime.Circle.Visible = false
-        end
-        
-        -- Update Aimbot
-        UpdateAim()
-    end)
+    Aimbot.Runtime.Connections.Update = RunService.RenderStepped:Connect(Update)
     
     return window
 end
 
--- Cleanup System
+-- Cleanup
 local function Cleanup()
     for _, connection in pairs(Aimbot.Runtime.Connections) do
         if connection.Connected then
             connection:Disconnect()
         end
     end
-    
-    if Aimbot.Runtime.Circle then
-        Aimbot.Runtime.Circle:Remove()
-    end
+    Aimbot.Runtime.Circle:Remove()
 end
 
--- Create Instance
+-- Create instance
 local Window = Initialize()
 
--- Return API
 return {
     Window = Window,
     Cleanup = Cleanup
