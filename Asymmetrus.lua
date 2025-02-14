@@ -1,7 +1,11 @@
 --[[
-    Simple Aimbot System
-    Platform: Roblox
-    Version: 1.0.0
+    Advanced Combat Assistance System
+    Features:
+    - Smooth mouse and camera movement
+    - Visual target highlighting
+    - FOV circle
+    - Line of sight checking
+    - Team check system
 ]]
 
 -- Load Censura UI Framework
@@ -22,6 +26,17 @@ local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
+-- Highlight System
+local function CreateHighlight()
+    local highlight = Instance.new("Highlight")
+    highlight.FillColor = Color3.new(1, 0, 0) -- Red for visible
+    highlight.OutlineColor = Color3.new(1, 1, 1) -- White outline
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    return highlight
+end
+
 -- Aimbot Core
 local Aimbot = {
     Settings = {
@@ -31,13 +46,17 @@ local Aimbot = {
             Enabled = true,
             Size = 200
         },
-        MaxDistance = 1000
+        MaxDistance = 1000,
+        SmoothFactor = 0.5, -- Lower = smoother
+        VisibilityCheck = true
     },
     
     Runtime = {
         Circle = Drawing.new("Circle"),
-        Connections = {},
-        Active = false
+        Highlight = CreateHighlight(),
+        CurrentTarget = nil,
+        Active = false,
+        Connections = {}
     }
 }
 
@@ -53,11 +72,37 @@ do
     circle.Visible = true
 end
 
--- Get Closest Target
+-- Utility Functions
+local function IsVisible(part)
+    local origin = Camera.CFrame.Position
+    local direction = (part.Position - origin).Unit
+    local distance = (part.Position - origin).Magnitude
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local result = workspace:Raycast(origin, direction * distance, raycastParams)
+    
+    return not result or result.Instance:IsDescendantOf(part.Parent)
+end
+
+local function UpdateHighlight(character, isVisible)
+    if not character then
+        Aimbot.Runtime.Highlight.Parent = nil
+        return
+    end
+    
+    Aimbot.Runtime.Highlight.FillColor = isVisible and Color3.new(1, 0, 0) or Color3.new(1, 1, 1)
+    Aimbot.Runtime.Highlight.Parent = character
+end
+
+-- Target Acquisition
 local function GetTarget()
     local closest = nil
     local shortestDistance = math.huge
     local mousePos = UserInputService:GetMouseLocation()
+    local isVisible = false
     
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and 
@@ -76,9 +121,15 @@ local function GetTarget()
                         local screenPos = Vector2.new(pos.X, pos.Y)
                         local fovDistance = (screenPos - mousePos).Magnitude
                         
-                        if fovDistance <= Aimbot.Settings.FOVCircle.Size and fovDistance < shortestDistance then
-                            shortestDistance = fovDistance
-                            closest = head
+                        if fovDistance <= Aimbot.Settings.FOVCircle.Size then
+                            local targetVisible = IsVisible(head)
+                            
+                            if fovDistance < shortestDistance and 
+                               (not Aimbot.Settings.VisibilityCheck or targetVisible) then
+                                shortestDistance = fovDistance
+                                closest = head
+                                isVisible = targetVisible
+                            end
                         end
                     end
                 end
@@ -86,10 +137,10 @@ local function GetTarget()
         end
     end
     
-    return closest
+    return closest, isVisible
 end
 
--- Handle Input
+-- Input Handling
 UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.LeftAlt then
         Aimbot.Runtime.Active = true
@@ -99,10 +150,11 @@ end)
 UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.LeftAlt then
         Aimbot.Runtime.Active = false
+        UpdateHighlight(nil)
     end
 end)
 
--- Update Function
+-- Aim System
 local function Update()
     -- Update FOV Circle
     if Aimbot.Settings.FOVCircle.Enabled then
@@ -115,29 +167,41 @@ local function Update()
     
     -- Check if aimbot should be active
     if not (Aimbot.Settings.Enabled and Aimbot.Runtime.Active) then
+        UpdateHighlight(nil)
         return
     end
     
     -- Get and validate target
-    local target = GetTarget()
-    if not target then return end
+    local target, isVisible = GetTarget()
+    if not target then
+        UpdateHighlight(nil)
+        return
+    end
+    
+    -- Update highlight
+    UpdateHighlight(target.Parent, isVisible)
     
     -- Calculate aim position
     local pos, onScreen = Camera:WorldToViewportPoint(target.Position)
     if not onScreen then return end
     
-    -- Move mouse and camera
-    mousemoverel(
-        (pos.X - UserInputService:GetMouseLocation().X) * 0.5,
-        (pos.Y - UserInputService:GetMouseLocation().Y) * 0.5
-    )
+    -- Smooth mouse movement
+    local mousePos = UserInputService:GetMouseLocation()
+    local targetPos = Vector2.new(pos.X, pos.Y)
+    local delta = (targetPos - mousePos) * Aimbot.Settings.SmoothFactor
+    
+    mousemoverel(delta.X, delta.Y)
+    
+    -- Update camera
+    local targetCF = CFrame.lookAt(Camera.CFrame.Position, target.Position)
+    Camera.CFrame = Camera.CFrame:Lerp(targetCF, Aimbot.Settings.SmoothFactor)
 end
 
--- Create UI
+-- UI Creation
 local function CreateUI()
     local window = Censura:CreateWindow({
         title = "Combat Assistance",
-        size = UDim2.new(0, 250, 0, 200)
+        size = UDim2.new(0, 250, 0, 250)
     })
     
     window:AddButton({ label = "Main Settings" })
@@ -158,6 +222,14 @@ local function CreateUI()
         end
     })
     
+    window:AddToggle({
+        label = "Visibility Check",
+        default = Aimbot.Settings.VisibilityCheck,
+        callback = function(state)
+            Aimbot.Settings.VisibilityCheck = state
+        end
+    })
+    
     window:AddButton({ label = "FOV Settings" })
     
     window:AddToggle({
@@ -175,6 +247,18 @@ local function CreateUI()
         default = Aimbot.Settings.FOVCircle.Size,
         callback = function(value)
             Aimbot.Settings.FOVCircle.Size = value
+        end
+    })
+    
+    window:AddButton({ label = "Aim Settings" })
+    
+    window:AddSlider({
+        label = "Smooth Factor",
+        min = 1,
+        max = 100,
+        default = Aimbot.Settings.SmoothFactor * 100,
+        callback = function(value)
+            Aimbot.Settings.SmoothFactor = value / 100
         end
     })
     
@@ -208,7 +292,9 @@ local function Cleanup()
             connection:Disconnect()
         end
     end
+    
     Aimbot.Runtime.Circle:Remove()
+    Aimbot.Runtime.Highlight:Destroy()
 end
 
 -- Create instance
