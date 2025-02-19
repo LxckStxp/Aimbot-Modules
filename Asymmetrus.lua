@@ -1,8 +1,12 @@
---[[
-    Advanced Aimbot System
-    Using Modern CensuraDev UI Library
-    Optimized for Performance and User Experience
---]]
+------------------------------------------------------------
+-- Advanced Aimbot System – Revised (Persistent Target Effect)
+-- Version: 1.2
+-- Dependencies: LSCommons, CensuraDev (UI)
+------------------------------------------------------------
+
+-- Dependencies
+local LSCommons = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/LSCommons/main/LSCommons.lua"))()
+local UI = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/CensuraDev.lua"))()
 
 -- Services
 local Players = game:GetService("Players")
@@ -13,114 +17,119 @@ local Debris = game:GetService("Debris")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
--- Load CensuraDev UI Library
-local CensuraDev = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/CensuraDev.lua"))()
-
--- Aimbot Configuration
+------------------------------------------------------------
+-- Aimbot Configuration and Manager
+------------------------------------------------------------
 local Aimbot = {
-    Enabled = false,
-    IsAiming = false,
-    TargetPart = "Head",
-    Smoothness = 0.5,
-    FOV = 400,
-    MaxDistance = 1000,
-    TeamCheck = false,
-    VisibilityCheck = true,
+    Enabled = false,          -- main toggle from UI
+    Aiming = false,           -- ALT key pressed?
+    TargetPart = "Head",      -- part to aim at ("Head" or "HumanoidRootPart")
+    Smoothness = 0.5,         -- factor between 0 (snap) and 1 (slow)
+    FOV = 400,                -- field-of-view threshold (in pixels)
+    MaxDistance = 1000,       -- maximum target distance in world units
+    VisibilityCheck = true,   -- require target to be visible?
     
-    -- Cache System
-    CurrentTarget = nil,
-    CurrentHighlight = nil,
-    CachedPlayers = {},
+    CurrentTarget = nil,      -- currently locked target (player or NPC)
+    CurrentEffect = nil,      -- persistent visual effect instance on the target
+    
+    -- Caching system (for players and NPCs)
+    CachedTargets = {},
     LastCacheUpdate = 0,
-    CacheUpdateInterval = 0.1,
+    CacheUpdateInterval = 0.1,  -- seconds
+    
     LastUpdate = 0,
-    UpdateInterval = 1/144, -- Fixed 144Hz update rate
-    
-    -- Player Management
-    PlayerList = {},
-    
-    -- Visual Settings
-    Colors = {
-        Enabled = Color3.fromRGB(126, 131, 255),
-        Disabled = Color3.fromRGB(255, 85, 85),
-        Highlight = Color3.fromRGB(255, 255, 255)
-    }
+    UpdateInterval = 1 / 144    -- 144Hz update rate
 }
 
--- Utility Functions
-local function IsPlayerAlive(player)
-    local character = player.Character
-    return character 
-        and character:FindFirstChild("Humanoid") 
-        and character:FindFirstChild("Head")
-        and character.Humanoid.Health > 0
+------------------------------------------------------------
+-- Utility Functions (using LSCommons where possible)
+------------------------------------------------------------
+
+-- Check if an entity (player or NPC) is alive
+local function IsEntityAlive(entity)
+    if entity:IsA("Player") then
+        return entity.Character and LSCommons.Players.isAlive(entity.Character)
+    else
+        local hum = entity:FindFirstChild("Humanoid")
+        local head = entity:FindFirstChild("Head")
+        return hum and head and hum.Health > 0
+    end
 end
 
-local function IsValidTarget(player)
-    if player == LocalPlayer then return false end
-    if not IsPlayerAlive(player) then return false end
-    if Aimbot.TeamCheck and player.Team == LocalPlayer.Team then return false end
-    if not Aimbot.PlayerList[player.UserId] then return false end
-    
-    return player.Character:FindFirstChild(Aimbot.TargetPart) ~= nil
+-- Check if the entity has the target part
+local function HasTargetPart(entity)
+    if entity:IsA("Player") then
+        return entity.Character and entity.Character:FindFirstChild(Aimbot.TargetPart)
+    else
+        return entity:FindFirstChild(Aimbot.TargetPart) ~= nil
+    end
 end
 
-local function IsVisible(player)
-    if not player.Character then return false end
-    local character = LocalPlayer.Character
-    if not character then return false end
-    
-    local targetPart = player.Character:FindFirstChild(Aimbot.TargetPart)
-    if not targetPart then return false end
-    
-    local ray = Ray.new(
-        character.Head.Position,
-        (targetPart.Position - character.Head.Position).Unit * Aimbot.MaxDistance
-    )
-    
-    local hit = workspace:FindPartOnRayWithIgnoreList(ray, {character, Camera})
-    return hit and hit:IsDescendantOf(player.Character)
+-- Unified valid target check
+local function IsValidTarget(entity)
+    if entity:IsA("Player") and entity == LocalPlayer then 
+        return false 
+    end
+    return IsEntityAlive(entity) and HasTargetPart(entity)
 end
 
--- Target System
-local function UpdatePlayerCache()
+-- For NPCs: Search workspace children using LSCommons isNPC
+local function GetNPCs()
+    local npcs = {}
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if LSCommons.Players.isNPC(obj) and IsValidTarget(obj) then
+            table.insert(npcs, obj)
+        end
+    end
+    return npcs
+end
+
+-- Update our cache of valid targets (players & NPCs)
+local function UpdateTargetCache()
     local currentTime = tick()
     if currentTime - Aimbot.LastCacheUpdate < Aimbot.CacheUpdateInterval then return end
     
-    Aimbot.CachedPlayers = {}
+    local cache = {}
+    -- Valid players (exclude LocalPlayer)
     for _, player in ipairs(Players:GetPlayers()) do
-        if IsValidTarget(player) then
-            table.insert(Aimbot.CachedPlayers, player)
+        if player ~= LocalPlayer and IsValidTarget(player) then
+            table.insert(cache, player)
         end
     end
+    -- Valid NPCs
+    for _, npc in ipairs(GetNPCs()) do
+        table.insert(cache, npc)
+    end
     
+    Aimbot.CachedTargets = cache
     Aimbot.LastCacheUpdate = currentTime
 end
 
-local function GetClosestPlayer()
+-- Returns the closest valid target based on the screen distance from the mouse.
+local function GetClosestTarget()
     local closest = nil
     local shortestDistance = Aimbot.FOV
     local mousePos = UserInputService:GetMouseLocation()
     
-    UpdatePlayerCache()
+    UpdateTargetCache()
     
-    for _, player in ipairs(Aimbot.CachedPlayers) do
-        local character = player.Character
+    for _, entity in ipairs(Aimbot.CachedTargets) do
+        local character = entity:IsA("Player") and entity.Character or entity
         if not character then continue end
         
         local targetPart = character:FindFirstChild(Aimbot.TargetPart)
         if not targetPart then continue end
         
-        local distance = (LocalPlayer.Character:GetPivot().Position - targetPart.Position).Magnitude
-        if distance > Aimbot.MaxDistance then continue end
+        local worldDistance = (LocalPlayer.Character:GetPivot().Position - targetPart.Position).Magnitude
+        if worldDistance > Aimbot.MaxDistance then continue end
         
-        local pos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+        local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
         if not onScreen then continue end
         
-        local screenDistance = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+        local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
         if screenDistance < shortestDistance then
-            if Aimbot.VisibilityCheck and not IsVisible(player) then continue end
-            closest = player
+            if Aimbot.VisibilityCheck and (not IsVisible(entity)) then continue end
+            closest = entity
             shortestDistance = screenDistance
         end
     end
@@ -128,92 +137,158 @@ local function GetClosestPlayer()
     return closest
 end
 
--- Visual Feedback System
-local VisualSystem = {
-    CreateTargetEffect = function(position)
-        local ring = Instance.new("Part")
-        ring.Size = Vector3.new(2, 2, 2)
-        ring.CFrame = CFrame.new(position)
-        ring.Anchored = true
-        ring.CanCollide = false
-        ring.Transparency = 0.5
-        ring.Material = Enum.Material.Neon
-        ring.Color = Aimbot.Colors.Enabled
-        ring.Parent = workspace
-        
-        TweenService:Create(ring,
-            TweenInfo.new(0.3),
-            {Size = Vector3.new(0, 0, 0), Transparency = 1}
-        ):Play()
-        
-        Debris:AddItem(ring, 0.3)
-    end,
+-- Visibility check via raycasting
+function IsVisible(entity)
+    local character = entity:IsA("Player") and entity.Character or entity
+    if not character then return false end
     
-    UpdateTargetHighlight = function(player)
-        if player == Aimbot.CurrentTarget then return end
-        
-        if Aimbot.CurrentHighlight then
-            Aimbot.CurrentHighlight:Destroy()
-            Aimbot.CurrentHighlight = nil
-        end
-        
-        if player then
-            local highlight = Instance.new("Highlight")
-            highlight.FillColor = IsVisible(player) and 
-                Aimbot.Colors.Enabled or 
-                Aimbot.Colors.Highlight
-            highlight.OutlineColor = Aimbot.Colors.Highlight
-            highlight.FillTransparency = 0.5
-            highlight.OutlineTransparency = 0
-            highlight.Parent = player.Character
-            
-            Aimbot.CurrentHighlight = highlight
-        end
-        
-        Aimbot.CurrentTarget = player
-    end
-}
-
--- Aiming System
-local function AimAtTarget(targetPos)
-    if not targetPos then return end
+    local targetPart = character:FindFirstChild(Aimbot.TargetPart)
+    if not targetPart then return false end
     
-    local targetCF = CFrame.new(Camera.CFrame.Position, targetPos)
-    Camera.CFrame = Camera.CFrame:Lerp(targetCF, Aimbot.Smoothness)
+    local localHead = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head")
+    if not localHead then return false end
+    
+    local rayOrigin = localHead.Position
+    local rayDir = (targetPart.Position - rayOrigin).Unit * Aimbot.MaxDistance
+    local ignoreList = {LocalPlayer.Character, Camera}
+    local hitPart = workspace:FindPartOnRayWithIgnoreList(Ray.new(rayOrigin, rayDir), ignoreList)
+    
+    return hitPart and hitPart:IsDescendantOf(character)
 end
 
--- UI Creation
-local function CreateMainWindow()
-    local ui = CensuraDev.new()
-    
-    -- Main toggle
-    ui:CreateToggle("Enable Aimbot [ALT]", false, function(enabled)
-        Aimbot.Enabled = enabled
-        if not enabled and Aimbot.CurrentHighlight then
-            Aimbot.CurrentHighlight:Destroy()
-            Aimbot.CurrentHighlight = nil
-            Aimbot.CurrentTarget = nil
+-- Smoothly aim the camera toward target position using Lerp.
+local function AimAtTarget(targetPos)
+    if not targetPos then return end
+    local currentCF = Camera.CFrame
+    local desiredCF = CFrame.new(currentCF.Position, targetPos)
+    Camera.CFrame = currentCF:Lerp(desiredCF, Aimbot.Smoothness)
+end
+
+------------------------------------------------------------
+-- Persistent Visual Feedback System
+------------------------------------------------------------
+local VisualSystem = {}
+
+function VisualSystem.CreatePersistentTargetEffect(targetPart)
+    local ring = Instance.new("Part")
+    ring.Name = "AimbotTargetEffect"
+    ring.Size = Vector3.new(2, 2, 2)
+    ring.CFrame = targetPart.CFrame
+    ring.Anchored = true
+    ring.CanCollide = false
+    ring.Transparency = 0.2
+    ring.Material = Enum.Material.Neon
+    ring.Color = Color3.fromRGB(126, 131, 255)
+    ring.Parent = workspace
+    return ring
+end
+
+function VisualSystem.UpdatePersistentTargetEffect(effect, targetPart)
+    if effect and targetPart then
+        effect.CFrame = targetPart.CFrame
+    end
+end
+
+function VisualSystem.RemovePersistentTargetEffect(effect)
+    if effect then
+        effect:Destroy()
+    end
+end
+
+------------------------------------------------------------
+-- Input Handling
+------------------------------------------------------------
+local function SetupInputHandling()
+    UserInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.LeftAlt then
+            Aimbot.Aiming = true
+            Aimbot.LastCacheUpdate = 0  -- Force cache update on aim
         end
     end)
     
-    -- Smoothness control
+    UserInputService.InputEnded:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.LeftAlt then
+            Aimbot.Aiming = false
+            Aimbot.CurrentTarget = nil
+            if Aimbot.CurrentEffect then
+                VisualSystem.RemovePersistentTargetEffect(Aimbot.CurrentEffect)
+                Aimbot.CurrentEffect = nil
+            end
+        end
+    end)
+end
+
+------------------------------------------------------------
+-- Aimbot Main Update Loop
+------------------------------------------------------------
+local function StartAimbotLoop()
+    RunService.RenderStepped:Connect(function()
+        if (not Aimbot.Enabled) or (not Aimbot.Aiming) then return end
+        
+        local currentTime = tick()
+        if currentTime - Aimbot.LastUpdate < Aimbot.UpdateInterval then return end
+        Aimbot.LastUpdate = currentTime
+        
+        -- If current target is still valid, remain locked on.
+        if Aimbot.CurrentTarget and IsValidTarget(Aimbot.CurrentTarget) then
+            local character = Aimbot.CurrentTarget:IsA("Player") and Aimbot.CurrentTarget.Character or Aimbot.CurrentTarget
+            local targetPart = character and character:FindFirstChild(Aimbot.TargetPart)
+            if targetPart then
+                AimAtTarget(targetPart.Position)
+                if Aimbot.CurrentEffect then
+                    VisualSystem.UpdatePersistentTargetEffect(Aimbot.CurrentEffect, targetPart)
+                else
+                    -- Create persistent target effect once per target lock.
+                    Aimbot.CurrentEffect = VisualSystem.CreatePersistentTargetEffect(targetPart)
+                end
+            end
+        else
+            -- Otherwise, search for a new target.
+            local newTarget = GetClosestTarget()
+            if newTarget then
+                Aimbot.CurrentTarget = newTarget
+                if Aimbot.CurrentEffect then
+                    VisualSystem.RemovePersistentTargetEffect(Aimbot.CurrentEffect)
+                    Aimbot.CurrentEffect = nil
+                end
+            else
+                Aimbot.CurrentTarget = nil
+                if Aimbot.CurrentEffect then
+                    VisualSystem.RemovePersistentTargetEffect(Aimbot.CurrentEffect)
+                    Aimbot.CurrentEffect = nil
+                end
+            end
+        end
+    end)
+end
+
+------------------------------------------------------------
+-- UI Setup using CensuraDev
+------------------------------------------------------------
+local function CreateMainWindow()
+    local ui = UI.new("Aimbot")
+    
+    ui:CreateToggle("Enable Aimbot [ALT]", false, function(enabled)
+        Aimbot.Enabled = enabled
+        if not enabled then
+            Aimbot.CurrentTarget = nil
+            if Aimbot.CurrentEffect then
+                VisualSystem.RemovePersistentTargetEffect(Aimbot.CurrentEffect)
+                Aimbot.CurrentEffect = nil
+            end
+        end
+    end)
+    
     ui:CreateSlider("Smoothness", 1, 100, 50, function(value)
         Aimbot.Smoothness = value / 100
     end)
     
-    -- FOV control
     ui:CreateSlider("FOV", 50, 800, 400, function(value)
         Aimbot.FOV = value
     end)
     
-    -- Distance control
     ui:CreateSlider("Max Distance", 100, 2000, 1000, function(value)
         Aimbot.MaxDistance = value
-    end)
-    
-    -- Toggles
-    ui:CreateToggle("Team Check", false, function(enabled)
-        Aimbot.TeamCheck = enabled
     end)
     
     ui:CreateToggle("Visibility Check", true, function(enabled)
@@ -224,94 +299,21 @@ local function CreateMainWindow()
         Aimbot.TargetPart = enabled and "Head" or "HumanoidRootPart"
     end)
     
-    -- Player list button
-    ui:CreateButton("Player List", function()
-        CreatePlayerListWindow()
-    end)
-    
     return ui
 end
 
-local function CreatePlayerListWindow()
-    local playerListUI = CensuraDev.new()
-    
-    -- Create toggles for existing players
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            playerListUI:CreateToggle(player.Name, true, function(enabled)
-                Aimbot.PlayerList[player.UserId] = enabled
-            end)
-        end
-    end
-    
-    -- Handle new players
-    Players.PlayerAdded:Connect(function(player)
-        if player ~= LocalPlayer then
-            playerListUI:CreateToggle(player.Name, true, function(enabled)
-                Aimbot.PlayerList[player.UserId] = enabled
-            end)
-        end
-    end)
-    
-    playerListUI:Show()
-end
-
--- Input Handling
-local function SetupInputHandling()
-    UserInputService.InputBegan:Connect(function(input)
-        if input.KeyCode == Enum.KeyCode.LeftAlt then
-            Aimbot.IsAiming = true
-            Aimbot.LastCacheUpdate = 0
-        end
-    end)
-    
-    UserInputService.InputEnded:Connect(function(input)
-        if input.KeyCode == Enum.KeyCode.LeftAlt then
-            Aimbot.IsAiming = false
-            if Aimbot.CurrentHighlight then
-                Aimbot.CurrentHighlight:Destroy()
-                Aimbot.CurrentHighlight = nil
-                Aimbot.CurrentTarget = nil
-            end
-        end
-    end)
-end
-
--- Main Loop
-local function StartAimbotLoop()
-    RunService.Heartbeat:Connect(function()
-        if not Aimbot.Enabled or not Aimbot.IsAiming then return end
-        
-        local currentTime = tick()
-        if currentTime - Aimbot.LastUpdate < Aimbot.UpdateInterval then return end
-        Aimbot.LastUpdate = currentTime
-        
-        local target = GetClosestPlayer()
-        VisualSystem.UpdateTargetHighlight(target)
-        
-        if target and target.Character then
-            local targetPart = target.Character:FindFirstChild(Aimbot.TargetPart)
-            if targetPart then
-                AimAtTarget(targetPart.Position)
-            end
-        end
-    end)
-end
-
--- Initialize
+------------------------------------------------------------
+-- Main Initialization
+------------------------------------------------------------
 local function Initialize()
-    -- Initialize player list
-    for _, player in ipairs(Players:GetPlayers()) do
-        Aimbot.PlayerList[player.UserId] = true
-    end
-    
     local mainUI = CreateMainWindow()
     SetupInputHandling()
     StartAimbotLoop()
     
-    -- Show UI
     mainUI:Show()
 end
 
--- Start the aimbot
+------------------------------------------------------------
+-- Start the Aimbot System
+------------------------------------------------------------
 Initialize()
