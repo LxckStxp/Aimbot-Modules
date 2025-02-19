@@ -1,6 +1,6 @@
 ------------------------------------------------------------
--- Advanced Aimbot System – Revised (Persistent Target Effect)
--- Version: 1.2
+-- Advanced Aimbot System – Revised (No Target Effect)
+-- Version: 1.3
 -- Dependencies: LSCommons, CensuraDev (UI)
 ------------------------------------------------------------
 
@@ -12,8 +12,6 @@ local UI = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/C
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local Debris = game:GetService("Debris")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
@@ -30,8 +28,7 @@ local Aimbot = {
     VisibilityCheck = true,   -- require target to be visible?
     
     CurrentTarget = nil,      -- currently locked target (player or NPC)
-    CurrentEffect = nil,      -- persistent visual effect instance on the target
-    
+
     -- Caching system (for players and NPCs)
     CachedTargets = {},
     LastCacheUpdate = 0,
@@ -44,8 +41,6 @@ local Aimbot = {
 ------------------------------------------------------------
 -- Utility Functions (using LSCommons where possible)
 ------------------------------------------------------------
-
--- Check if an entity (player or NPC) is alive
 local function IsEntityAlive(entity)
     if entity:IsA("Player") then
         return entity.Character and LSCommons.Players.isAlive(entity.Character)
@@ -56,7 +51,6 @@ local function IsEntityAlive(entity)
     end
 end
 
--- Check if the entity has the target part
 local function HasTargetPart(entity)
     if entity:IsA("Player") then
         return entity.Character and entity.Character:FindFirstChild(Aimbot.TargetPart)
@@ -65,7 +59,6 @@ local function HasTargetPart(entity)
     end
 end
 
--- Unified valid target check
 local function IsValidTarget(entity)
     if entity:IsA("Player") and entity == LocalPlayer then 
         return false 
@@ -73,7 +66,6 @@ local function IsValidTarget(entity)
     return IsEntityAlive(entity) and HasTargetPart(entity)
 end
 
--- For NPCs: Search workspace children using LSCommons isNPC
 local function GetNPCs()
     local npcs = {}
     for _, obj in ipairs(workspace:GetChildren()) do
@@ -84,19 +76,16 @@ local function GetNPCs()
     return npcs
 end
 
--- Update our cache of valid targets (players & NPCs)
 local function UpdateTargetCache()
     local currentTime = tick()
     if currentTime - Aimbot.LastCacheUpdate < Aimbot.CacheUpdateInterval then return end
     
     local cache = {}
-    -- Valid players (exclude LocalPlayer)
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and IsValidTarget(player) then
             table.insert(cache, player)
         end
     end
-    -- Valid NPCs
     for _, npc in ipairs(GetNPCs()) do
         table.insert(cache, npc)
     end
@@ -105,7 +94,6 @@ local function UpdateTargetCache()
     Aimbot.LastCacheUpdate = currentTime
 end
 
--- Returns the closest valid target based on the screen distance from the mouse.
 local function GetClosestTarget()
     local closest = nil
     local shortestDistance = Aimbot.FOV
@@ -137,7 +125,6 @@ local function GetClosestTarget()
     return closest
 end
 
--- Visibility check via raycasting
 function IsVisible(entity)
     local character = entity:IsA("Player") and entity.Character or entity
     if not character then return false end
@@ -156,43 +143,11 @@ function IsVisible(entity)
     return hitPart and hitPart:IsDescendantOf(character)
 end
 
--- Smoothly aim the camera toward target position using Lerp.
 local function AimAtTarget(targetPos)
     if not targetPos then return end
     local currentCF = Camera.CFrame
     local desiredCF = CFrame.new(currentCF.Position, targetPos)
     Camera.CFrame = currentCF:Lerp(desiredCF, Aimbot.Smoothness)
-end
-
-------------------------------------------------------------
--- Persistent Visual Feedback System
-------------------------------------------------------------
-local VisualSystem = {}
-
-function VisualSystem.CreatePersistentTargetEffect(targetPart)
-    local ring = Instance.new("Part")
-    ring.Name = "AimbotTargetEffect"
-    ring.Size = Vector3.new(2, 2, 2)
-    ring.CFrame = targetPart.CFrame
-    ring.Anchored = true
-    ring.CanCollide = false
-    ring.Transparency = 0.2
-    ring.Material = Enum.Material.Neon
-    ring.Color = Color3.fromRGB(126, 131, 255)
-    ring.Parent = workspace
-    return ring
-end
-
-function VisualSystem.UpdatePersistentTargetEffect(effect, targetPart)
-    if effect and targetPart then
-        effect.CFrame = targetPart.CFrame
-    end
-end
-
-function VisualSystem.RemovePersistentTargetEffect(effect)
-    if effect then
-        effect:Destroy()
-    end
 end
 
 ------------------------------------------------------------
@@ -210,10 +165,6 @@ local function SetupInputHandling()
         if input.KeyCode == Enum.KeyCode.LeftAlt then
             Aimbot.Aiming = false
             Aimbot.CurrentTarget = nil
-            if Aimbot.CurrentEffect then
-                VisualSystem.RemovePersistentTargetEffect(Aimbot.CurrentEffect)
-                Aimbot.CurrentEffect = nil
-            end
         end
     end)
 end
@@ -229,35 +180,15 @@ local function StartAimbotLoop()
         if currentTime - Aimbot.LastUpdate < Aimbot.UpdateInterval then return end
         Aimbot.LastUpdate = currentTime
         
-        -- If current target is still valid, remain locked on.
+        -- If a valid target is currently locked, continue locking onto it.
         if Aimbot.CurrentTarget and IsValidTarget(Aimbot.CurrentTarget) then
             local character = Aimbot.CurrentTarget:IsA("Player") and Aimbot.CurrentTarget.Character or Aimbot.CurrentTarget
             local targetPart = character and character:FindFirstChild(Aimbot.TargetPart)
             if targetPart then
                 AimAtTarget(targetPart.Position)
-                if Aimbot.CurrentEffect then
-                    VisualSystem.UpdatePersistentTargetEffect(Aimbot.CurrentEffect, targetPart)
-                else
-                    -- Create persistent target effect once per target lock.
-                    Aimbot.CurrentEffect = VisualSystem.CreatePersistentTargetEffect(targetPart)
-                end
             end
         else
-            -- Otherwise, search for a new target.
-            local newTarget = GetClosestTarget()
-            if newTarget then
-                Aimbot.CurrentTarget = newTarget
-                if Aimbot.CurrentEffect then
-                    VisualSystem.RemovePersistentTargetEffect(Aimbot.CurrentEffect)
-                    Aimbot.CurrentEffect = nil
-                end
-            else
-                Aimbot.CurrentTarget = nil
-                if Aimbot.CurrentEffect then
-                    VisualSystem.RemovePersistentTargetEffect(Aimbot.CurrentEffect)
-                    Aimbot.CurrentEffect = nil
-                end
-            end
+            Aimbot.CurrentTarget = GetClosestTarget()
         end
     end)
 end
@@ -272,10 +203,6 @@ local function CreateMainWindow()
         Aimbot.Enabled = enabled
         if not enabled then
             Aimbot.CurrentTarget = nil
-            if Aimbot.CurrentEffect then
-                VisualSystem.RemovePersistentTargetEffect(Aimbot.CurrentEffect)
-                Aimbot.CurrentEffect = nil
-            end
         end
     end)
     
