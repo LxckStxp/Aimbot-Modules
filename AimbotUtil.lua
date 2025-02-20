@@ -1,10 +1,13 @@
 --[[
     AimbotUtil Module
-    Version: 1.0
-    Core utility functions for aimbot targeting and calculations
+    Version: 1.1
+    Core aimbot calculations and target selection with HumanoidHandler integration
 ]]
 
 local AimbotUtil = {}
+
+-- Dependencies
+local HumanoidHandler = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/LSCommons/main/HumanoidHandler.lua"))()
 
 -- Services
 local Services = {
@@ -15,45 +18,39 @@ local Services = {
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Services.Players.LocalPlayer
 
--- Target Validation
-function AimbotUtil.isValidTarget(entity, config)
-    if not entity then return false end
+function AimbotUtil.isValidAimTarget(model, config)
+    if not HumanoidHandler.isValidHumanoid(model) then return false end
+    if model == LocalPlayer.Character then return false end
+    if not model:FindFirstChild(config.TargetPart) then return false end
     
-    -- Check if target is local player
-    if entity == LocalPlayer then return false end
+    local targetPos = AimbotUtil.getTargetPosition(model, config.TargetPart)
+    if not targetPos then return false end
     
-    -- Get character
-    local character = entity:IsA("Player") and entity.Character or entity
-    if not character then return false end
+    local worldDistance = (LocalPlayer.Character:GetPivot().Position - targetPos).Magnitude
+    if worldDistance > config.MaxDistance then return false end
     
-    -- Check for required parts
-    local humanoid = character:FindFirstChild("Humanoid")
-    local targetPart = character:FindFirstChild(config.TargetPart)
+    local screenPos, onScreen = Camera:WorldToScreenPoint(targetPos)
+    if onScreen then
+        if not AimbotUtil.isInFOV(screenPos, config.FOV) then return false end
+        if config.VisibilityCheck and not AimbotUtil.isVisible(model, config) then return false end
+        return true
+    end
     
-    return humanoid 
-        and humanoid.Health > 0 
-        and targetPart 
-        and character:FindFirstChild("Head")
+    return false
 end
 
--- Position Utilities
-function AimbotUtil.getTargetPosition(entity, targetPart)
-    local character = entity:IsA("Player") and entity.Character or entity
-    if not character then return nil end
-    
-    local part = character:FindFirstChild(targetPart)
+function AimbotUtil.getTargetPosition(model, targetPart)
+    local part = model:FindFirstChild(targetPart)
     return part and part.Position
 end
 
--- FOV Calculations
 function AimbotUtil.isInFOV(screenPos, fov)
     local mousePos = Services.UserInput:GetMouseLocation()
     return (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude <= fov
 end
 
--- Visibility Check
-function AimbotUtil.isVisible(entity, config)
-    local targetPos = AimbotUtil.getTargetPosition(entity, config.TargetPart)
+function AimbotUtil.isVisible(model, config)
+    local targetPos = AimbotUtil.getTargetPosition(model, config.TargetPart)
     if not targetPos then return false end
     
     local character = LocalPlayer.Character
@@ -69,37 +66,23 @@ function AimbotUtil.isVisible(entity, config)
     local direction = (targetPos - head.Position).Unit * config.MaxDistance
     local result = workspace:Raycast(head.Position, direction, params)
     
-    if result then
-        local hit = result.Instance
-        return hit:IsDescendantOf(entity:IsA("Player") and entity.Character or entity)
-    end
-    
-    return false
+    return result and result.Instance:IsDescendantOf(model)
 end
 
--- Target Selection
-function AimbotUtil.getBestTarget(cachedTargets, config)
+function AimbotUtil.getBestTarget(config)
     local closest = nil
     local minDistance = config.FOV
     local mousePos = Services.UserInput:GetMouseLocation()
     
-    for _, target in ipairs(cachedTargets) do
-        local targetPos = AimbotUtil.getTargetPosition(target, config.TargetPart)
-        if not targetPos then continue end
+    for _, model in ipairs(HumanoidHandler.getAllValidHumanoids()) do
+        if not AimbotUtil.isValidAimTarget(model, config) then continue end
         
-        -- Check distance
-        local worldDistance = (LocalPlayer.Character:GetPivot().Position - targetPos).Magnitude
-        if worldDistance > config.MaxDistance then continue end
-        
-        -- Check FOV
-        local screenPos, onScreen = Camera:WorldToScreenPoint(targetPos)
-        if not onScreen then continue end
-        
+        local targetPos = AimbotUtil.getTargetPosition(model, config.TargetPart)
+        local screenPos = Camera:WorldToScreenPoint(targetPos)
         local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+        
         if screenDistance < minDistance then
-            if config.VisibilityCheck and not AimbotUtil.isVisible(target, config) then continue end
-            
-            closest = target
+            closest = model
             minDistance = screenDistance
         end
     end
@@ -107,9 +90,8 @@ function AimbotUtil.getBestTarget(cachedTargets, config)
     return closest
 end
 
--- Aiming Calculations
 function AimbotUtil.calculateAimCFrame(targetPos, smoothness)
-    if not targetPos then return nil end
+    if not targetPos then return Camera.CFrame end
     
     local currentCF = Camera.CFrame
     local targetCF = CFrame.new(currentCF.Position, targetPos)
