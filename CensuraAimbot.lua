@@ -1,12 +1,13 @@
 --[[
-    Advanced Aimbot System
-    Version: 1.4
-    Dependencies: LSCommons, CensuraDev
+    CensuraAimbot Module
+    Version: 1.5
+    Main aimbot implementation using AimbotUtil
 ]]
 
 -- Dependencies
 local LSCommons = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/LSCommons/main/LSCommons.lua"))()
 local UI = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/CensuraDev.lua"))()
+local AimbotUtil = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Aimbot-Modules/main/AimbotUtil.lua"))()
 
 -- Services
 local Services = {
@@ -29,8 +30,8 @@ local AimbotConfig = {
     VisibilityCheck = true,
     
     -- Performance settings
-    UpdateRate = 144, -- Hz
-    CacheInterval = 0.1, -- seconds
+    UpdateRate = 144,
+    CacheInterval = 0.1,
     
     -- Internal state
     CurrentTarget = nil,
@@ -39,67 +40,8 @@ local AimbotConfig = {
     LastUpdate = 0
 }
 
--- Utility Functions
-local function IsValidTarget(entity)
-    if not entity then return false end
-    
-    -- Check if target is local player
-    if entity == LocalPlayer then return false end
-    
-    -- Get character
-    local character = entity:IsA("Player") and entity.Character or entity
-    if not character then return false end
-    
-    -- Check for required parts
-    local humanoid = character:FindFirstChild("Humanoid")
-    local targetPart = character:FindFirstChild(AimbotConfig.TargetPart)
-    
-    return humanoid 
-        and humanoid.Health > 0 
-        and targetPart 
-        and character:FindFirstChild("Head")
-end
-
-local function GetTargetPosition(entity)
-    local character = entity:IsA("Player") and entity.Character or entity
-    if not character then return nil end
-    
-    local targetPart = character:FindFirstChild(AimbotConfig.TargetPart)
-    return targetPart and targetPart.Position
-end
-
-local function IsInFOV(screenPos)
-    local mousePos = Services.UserInput:GetMouseLocation()
-    return (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude <= AimbotConfig.FOV
-end
-
-local function IsVisible(entity)
-    local targetPos = GetTargetPosition(entity)
-    if not targetPos then return false end
-    
-    local character = LocalPlayer.Character
-    if not character then return false end
-    
-    local head = character:FindFirstChild("Head")
-    if not head then return false end
-    
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {character, Camera}
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local direction = (targetPos - head.Position).Unit * AimbotConfig.MaxDistance
-    local result = workspace:Raycast(head.Position, direction, params)
-    
-    if result then
-        local hit = result.Instance
-        return hit:IsDescendantOf(entity:IsA("Player") and entity.Character or entity)
-    end
-    
-    return false
-end
-
--- Target Management
-local function UpdateTargetCache()
+-- Target Cache Management
+local function updateTargetCache()
     local currentTime = tick()
     if currentTime - AimbotConfig.LastCache < AimbotConfig.CacheInterval then return end
     
@@ -107,14 +49,14 @@ local function UpdateTargetCache()
     
     -- Cache players
     for _, player in ipairs(Services.Players:GetPlayers()) do
-        if IsValidTarget(player) then
+        if AimbotUtil.isValidTarget(player, AimbotConfig) then
             table.insert(cache, player)
         end
     end
     
     -- Cache NPCs
     for _, obj in ipairs(workspace:GetChildren()) do
-        if LSCommons.Players.isNPC(obj) and IsValidTarget(obj) then
+        if LSCommons.Players.isNPC(obj) and AimbotUtil.isValidTarget(obj, AimbotConfig) then
             table.insert(cache, obj)
         end
     end
@@ -123,49 +65,8 @@ local function UpdateTargetCache()
     AimbotConfig.LastCache = currentTime
 end
 
-local function GetBestTarget()
-    UpdateTargetCache()
-    
-    local closest = nil
-    local minDistance = AimbotConfig.FOV
-    local mousePos = Services.UserInput:GetMouseLocation()
-    
-    for _, target in ipairs(AimbotConfig.CachedTargets) do
-        local targetPos = GetTargetPosition(target)
-        if not targetPos then continue end
-        
-        -- Check distance
-        local worldDistance = (LocalPlayer.Character:GetPivot().Position - targetPos).Magnitude
-        if worldDistance > AimbotConfig.MaxDistance then continue end
-        
-        -- Check FOV
-        local screenPos, onScreen = Camera:WorldToScreenPoint(targetPos)
-        if not onScreen then continue end
-        
-        local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-        if screenDistance < minDistance then
-            if AimbotConfig.VisibilityCheck and not IsVisible(target) then continue end
-            
-            closest = target
-            minDistance = screenDistance
-        end
-    end
-    
-    return closest
-end
-
--- Aiming Logic
-local function AimAtTarget(targetPos)
-    if not targetPos then return end
-    
-    local currentCF = Camera.CFrame
-    local targetCF = CFrame.new(currentCF.Position, targetPos)
-    
-    Camera.CFrame = currentCF:Lerp(targetCF, AimbotConfig.Smoothness)
-end
-
 -- Input Handling
-local function SetupInputHandling()
+local function setupInputHandling()
     Services.UserInput.InputBegan:Connect(function(input)
         if input.KeyCode == Enum.KeyCode.LeftAlt then
             AimbotConfig.Aiming = true
@@ -182,7 +83,7 @@ local function SetupInputHandling()
 end
 
 -- Main Loop
-local function StartAimbotLoop()
+local function startAimbotLoop()
     Services.RunService.RenderStepped:Connect(function()
         if not (AimbotConfig.Enabled and AimbotConfig.Aiming) then return end
         
@@ -190,20 +91,22 @@ local function StartAimbotLoop()
         if currentTime - AimbotConfig.LastUpdate < (1 / AimbotConfig.UpdateRate) then return end
         AimbotConfig.LastUpdate = currentTime
         
-        if AimbotConfig.CurrentTarget and IsValidTarget(AimbotConfig.CurrentTarget) then
-            local targetPos = GetTargetPosition(AimbotConfig.CurrentTarget)
+        updateTargetCache()
+        
+        if AimbotConfig.CurrentTarget and AimbotUtil.isValidTarget(AimbotConfig.CurrentTarget, AimbotConfig) then
+            local targetPos = AimbotUtil.getTargetPosition(AimbotConfig.CurrentTarget, AimbotConfig.TargetPart)
             if targetPos then
-                AimAtTarget(targetPos)
+                Camera.CFrame = AimbotUtil.calculateAimCFrame(targetPos, AimbotConfig.Smoothness)
                 return
             end
         end
         
-        AimbotConfig.CurrentTarget = GetBestTarget()
+        AimbotConfig.CurrentTarget = AimbotUtil.getBestTarget(AimbotConfig.CachedTargets, AimbotConfig)
     end)
 end
 
 -- UI Setup
-local function CreateUI()
+local function createUI()
     local window = UI.new("Aimbot")
     
     window:CreateToggle("Enable Aimbot [ALT]", false, function(value)
@@ -238,11 +141,10 @@ end
 
 -- Initialization
 local function Initialize()
-    local mainWindow = CreateUI()
-    SetupInputHandling()
-    StartAimbotLoop()
+    local mainWindow = createUI()
+    setupInputHandling()
+    startAimbotLoop()
     mainWindow:Show()
 end
 
--- Start the system
 Initialize()
