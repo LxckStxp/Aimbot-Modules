@@ -1,7 +1,7 @@
 --[[
     CensuraAimbot Module
-    Version: 1.5
-    Main aimbot implementation using AimbotUtil
+    Version: 1.6
+    Main aimbot implementation using AimbotUtil and HumanoidHandler
 ]]
 
 -- Dependencies
@@ -11,13 +11,11 @@ local AimbotUtil = loadstring(game:HttpGet("https://raw.githubusercontent.com/Lx
 
 -- Services
 local Services = {
-    Players = game:GetService("Players"),
     RunService = game:GetService("RunService"),
     UserInput = game:GetService("UserInputService")
 }
 
 local Camera = workspace.CurrentCamera
-local LocalPlayer = Services.Players.LocalPlayer
 
 -- Configuration
 local AimbotConfig = {
@@ -31,46 +29,17 @@ local AimbotConfig = {
     
     -- Performance settings
     UpdateRate = 144,
-    CacheInterval = 0.1,
     
     -- Internal state
     CurrentTarget = nil,
-    CachedTargets = {},
-    LastCache = 0,
     LastUpdate = 0
 }
-
--- Target Cache Management
-local function updateTargetCache()
-    local currentTime = tick()
-    if currentTime - AimbotConfig.LastCache < AimbotConfig.CacheInterval then return end
-    
-    local cache = {}
-    
-    -- Cache players
-    for _, player in ipairs(Services.Players:GetPlayers()) do
-        if AimbotUtil.isValidTarget(player, AimbotConfig) then
-            table.insert(cache, player)
-        end
-    end
-    
-    -- Cache NPCs
-    for _, obj in ipairs(workspace:GetChildren()) do
-        if LSCommons.Players.isNPC(obj) and AimbotUtil.isValidTarget(obj, AimbotConfig) then
-            table.insert(cache, obj)
-        end
-    end
-    
-    AimbotConfig.CachedTargets = cache
-    AimbotConfig.LastCache = currentTime
-end
 
 -- Input Handling
 local function setupInputHandling()
     Services.UserInput.InputBegan:Connect(function(input)
         if input.KeyCode == Enum.KeyCode.LeftAlt then
             AimbotConfig.Aiming = true
-            AimbotConfig.LastCache = 0
         end
     end)
     
@@ -91,9 +60,7 @@ local function startAimbotLoop()
         if currentTime - AimbotConfig.LastUpdate < (1 / AimbotConfig.UpdateRate) then return end
         AimbotConfig.LastUpdate = currentTime
         
-        updateTargetCache()
-        
-        if AimbotConfig.CurrentTarget and AimbotUtil.isValidTarget(AimbotConfig.CurrentTarget, AimbotConfig) then
+        if AimbotConfig.CurrentTarget and AimbotUtil.isValidAimTarget(AimbotConfig.CurrentTarget, AimbotConfig) then
             local targetPos = AimbotUtil.getTargetPosition(AimbotConfig.CurrentTarget, AimbotConfig.TargetPart)
             if targetPos then
                 Camera.CFrame = AimbotUtil.calculateAimCFrame(targetPos, AimbotConfig.Smoothness)
@@ -101,7 +68,7 @@ local function startAimbotLoop()
             end
         end
         
-        AimbotConfig.CurrentTarget = AimbotUtil.getBestTarget(AimbotConfig.CachedTargets, AimbotConfig)
+        AimbotConfig.CurrentTarget = AimbotUtil.getBestTarget(AimbotConfig)
     end)
 end
 
@@ -139,7 +106,7 @@ local function createUI()
     return window
 end
 
--- Initialization
+-- Initialize
 local function Initialize()
     local mainWindow = createUI()
     setupInputHandling()
